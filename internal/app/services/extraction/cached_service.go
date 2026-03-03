@@ -1,0 +1,77 @@
+package extraction
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"strings"
+
+	"downaria-api/internal/extractors/core"
+	"downaria-api/internal/infra/cache"
+)
+
+type cachedService struct {
+	next      Service
+	cache     *cache.TTLCache
+	ttlConfig cache.PlatformTTLConfig
+}
+
+func NewCachedService(next Service, ttlConfig cache.PlatformTTLConfig) Service {
+	return &cachedService{
+		next:      next,
+		cache:     cache.NewTTLCache(),
+		ttlConfig: cache.NewPlatformTTLConfig(ttlConfig.DefaultTTL, ttlConfig.PlatformTTLs),
+	}
+}
+
+func (s *cachedService) Extract(ctx context.Context, input ExtractInput) (*core.ExtractResult, error) {
+	key := buildExtractCacheKey(input.URL, input.Cookie)
+	if value, ok := s.cache.Get(key); ok {
+		if result, castOK := value.(*core.ExtractResult); castOK && result != nil {
+			return cloneExtractResult(result), nil
+		}
+	}
+
+	result, err := s.next.Extract(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+
+	if result == nil {
+		return nil, nil
+	}
+
+	stored := cloneExtractResult(result)
+	s.cache.Set(key, stored, s.ttlConfig.TTLForPlatform(stored.Platform))
+
+	return cloneExtractResult(stored), nil
+}
+
+func buildExtractCacheKey(rawURL string, rawCookie string) string {
+	urlPart := strings.TrimSpace(rawURL)
+	cookiePart := strings.TrimSpace(rawCookie)
+	cookieHash := sha256.Sum256([]byte(cookiePart))
+
+	return fmt.Sprintf("url=%s|cookie_present=%t|cookie_sha256=%s", urlPart, cookiePart != "", hex.EncodeToString(cookieHash[:]))
+}
+
+func cloneExtractResult(src *core.ExtractResult) *core.ExtractResult {
+	if src == nil {
+		return nil
+	}
+
+	cloned := *src
+	if src.Media != nil {
+		cloned.Media = make([]core.Media, len(src.Media))
+		for i := range src.Media {
+			cloned.Media[i] = src.Media[i]
+			if src.Media[i].Variants != nil {
+				cloned.Media[i].Variants = make([]core.Variant, len(src.Media[i].Variants))
+				copy(cloned.Media[i].Variants, src.Media[i].Variants)
+			}
+		}
+	}
+
+	return &cloned
+}
