@@ -17,8 +17,7 @@ FROM alpine:3.20
 
 WORKDIR /app
 
-RUN apk add --no-cache ca-certificates tzdata ffmpeg python3 py3-pip \
-  && pip3 install --no-cache-dir yt-dlp
+RUN apk add --no-cache ca-certificates tzdata ffmpeg yt-dlp
 
 COPY --from=builder /out/downaria-api /app/downaria-api
 
