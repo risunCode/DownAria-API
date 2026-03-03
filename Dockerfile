@@ -21,8 +21,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   ca-certificates \
   tzdata \
   ffmpeg \
-  yt-dlp \
+  python3 \
+  python3-pip \
   curl \
+  && pip3 install --no-cache-dir --upgrade yt-dlp \
   && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /out/downaria-api /app/downaria-api
