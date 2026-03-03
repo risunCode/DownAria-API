@@ -11,17 +11,42 @@ import (
 	"strings"
 	"time"
 
-	"downaria-api/internal/extractors/core"
-	"downaria-api/internal/infra/network"
+	"fetchmoona/internal/extractors/core"
+	"fetchmoona/internal/infra/network"
 )
 
 var (
+	fbNumericRe = regexp.MustCompile(`^\d+$`)
+
+	// Story-first author patterns
+	fbStoryAuthorPatterns = []*regexp.Regexp{
+		regexp.MustCompile(`"story_bucket_owner":\{"__typename":"(?:User|Page)"[^}]*"name":"([^"]+)"`),
+		regexp.MustCompile(`"story_bucket_owner":\{[^}]*"name":"([^"]+)"`),
+		regexp.MustCompile(`"story_owner":\{"__typename":"(?:User|Page)"[^}]*"name":"([^"]+)"`),
+		regexp.MustCompile(`"story_owner":\{[^}]*"name":"([^"]+)"`),
+	}
+
 	// Author patterns (ported from Fetchtium_RE)
 	fbAuthorPatterns = []*regexp.Regexp{
 		regexp.MustCompile(`"name":"([^"]+)","enable_reels_tab_deeplink":true`),
 		regexp.MustCompile(`"owning_profile":\{"__typename":"(?:User|Page)","name":"([^"]+)"`),
 		regexp.MustCompile(`"owner":\{"__typename":"(?:User|Page)"[^}]*"name":"([^"]+)"`),
 		regexp.MustCompile(`"actors":\[\{"__typename":"User","name":"([^"]+)"`),
+	}
+
+	fbCreatedAtNumericPatterns = []*regexp.Regexp{
+		regexp.MustCompile(`"creation_time":(\d{10,13})`),
+		regexp.MustCompile(`"created_time":(\d{10,13})`),
+		regexp.MustCompile(`"publish_time":(\d{10,13})`),
+		regexp.MustCompile(`"creation_time":"(\d{10,13})"`),
+		regexp.MustCompile(`"created_time":"(\d{10,13})"`),
+		regexp.MustCompile(`"publish_time":"(\d{10,13})"`),
+	}
+
+	fbCreatedAtStringPatterns = []*regexp.Regexp{
+		regexp.MustCompile(`"creation_time":"([^"]+)"`),
+		regexp.MustCompile(`"created_time":"([^"]+)"`),
+		regexp.MustCompile(`"publish_time":"([^"]+)"`),
 	}
 
 	// Engagement patterns
@@ -109,6 +134,7 @@ func (e *FacebookExtractor) Extract(urlStr string, opts core.ExtractOptions) (*c
 		WithMediaType(e.detectMediaType(finalURL)).
 		WithAuthor(metadata.Author, "").
 		WithContent("", metadata.Title, metadata.Description).
+		WithCreatedAt(metadata.CreatedAt).
 		WithEngagement(metadata.Views, metadata.Likes, metadata.Comments, metadata.Shares).
 		WithAuthentication(opts.Cookie != "", opts.Source)
 
@@ -130,7 +156,7 @@ func (e *FacebookExtractor) Extract(urlStr string, opts core.ExtractOptions) (*c
 		if isImage {
 			ext = "jpg"
 		}
-		filename := core.GenerateFilenameWithMeta(metadata.Author, metadata.Title, metadata.Author, "", ext)
+		filename := e.buildVariantFilename(metadata, finalURL, ext)
 		variant = variant.WithFilename(filename)
 		core.AddVariant(&media, variant)
 	}
@@ -186,9 +212,13 @@ func (e *FacebookExtractor) checkContentIssues(html string) error {
 	hasMedia := strings.Contains(html, "browser_native_hd_url") ||
 		strings.Contains(html, "browser_native_sd_url") ||
 		strings.Contains(html, "playable_url") ||
+		strings.Contains(html, "progressive_url") ||
 		strings.Contains(html, "all_subattachments") ||
 		strings.Contains(html, "viewer_image") ||
-		strings.Contains(html, "photo_image")
+		strings.Contains(html, "photo_image") ||
+		strings.Contains(html, "preferred_thumbnail") ||
+		strings.Contains(html, "story_thumbnail") ||
+		strings.Contains(html, "previewImage")
 
 	// Check for content unavailable (cookie/private/age-restricted unified detection)
 	// These three cases result in the same pattern: no media + login redirect + unavailable message
@@ -281,10 +311,14 @@ func (e *FacebookExtractor) checkLoginRequired(html string) error {
 		"browser_native_hd_url",
 		"browser_native_sd_url",
 		"playable_url",
+		"progressive_url",
 		"all_subattachments",
 		"viewer_image",
 		"photo_image",
 		"preferred_thumbnail",
+		"story_thumbnail",
+		"previewImage",
+		"dash_manifest",
 		"hd_src",
 		"sd_src",
 		"video_url",
@@ -330,6 +364,7 @@ type fbMetadata struct {
 	Title       string
 	Author      string
 	Description string
+	CreatedAt   string
 	Thumbnail   string
 	Views       int64
 	Likes       int64
@@ -339,6 +374,7 @@ type fbMetadata struct {
 
 func (e *FacebookExtractor) extractMetadata(html, finalURL string) fbMetadata {
 	m := fbMetadata{}
+	isStory := isFacebookStoryURL(finalURL)
 
 	patterns := map[string]*regexp.Regexp{
 		"title":       regexp.MustCompile(`<meta[^>]+property="og:title"[^>]+content="([^"]+)"`),
@@ -356,15 +392,15 @@ func (e *FacebookExtractor) extractMetadata(html, finalURL string) fbMetadata {
 		m.Thumbnail = unescapeHTML(match[1])
 	}
 
-	// Author patterns (HTML embedded JSON)
-	for _, pattern := range fbAuthorPatterns {
-		if match := pattern.FindStringSubmatch(html); len(match) > 1 {
-			author := normalizeTextField(match[1])
-			if author != "" && !strings.EqualFold(author, "facebook") {
-				m.Author = author
-				break
-			}
+	if isStory {
+		m.Author = extractFirstAuthor(html, fbStoryAuthorPatterns, isUsableStoryAuthor)
+		if m.Author == "" {
+			m.Author = extractStoryAuthorFromURL(finalURL)
 		}
+	}
+
+	if m.Author == "" {
+		m.Author = extractFirstAuthor(html, fbAuthorPatterns, isUsableGenericAuthor)
 	}
 
 	// Extract author from title if possible
@@ -372,9 +408,16 @@ func (e *FacebookExtractor) extractMetadata(html, finalURL string) fbMetadata {
 		parts := strings.Split(m.Title, " - ")
 		if len(parts) >= 2 {
 			if m.Author == "" {
-				m.Author = strings.TrimSpace(parts[0])
+				candidate := strings.TrimSpace(parts[0])
+				if (!isStory && isUsableGenericAuthor(candidate)) || (isStory && isUsableStoryAuthor(candidate)) {
+					m.Author = candidate
+				}
 			}
 		}
+	}
+
+	if isStory && m.Author == "" {
+		m.Author = extractStoryAuthorFromURL(finalURL)
 	}
 
 	// Engagement extraction
@@ -420,6 +463,11 @@ func (e *FacebookExtractor) extractMetadata(html, finalURL string) fbMetadata {
 	}
 
 	m.Title = cleanFacebookTitle(m.Title, m.Author)
+	m.CreatedAt = extractCreatedAt(html)
+
+	if isStory && !hasUsableText(m.Title) && !hasUsableText(m.Description) {
+		m.Title = "story"
+	}
 
 	return m
 }
@@ -519,6 +567,192 @@ func parseStatsFromTitleLikeText(text string) (int64, int64) {
 	return views, likes
 }
 
+func (e *FacebookExtractor) buildVariantFilename(metadata fbMetadata, finalURL, ext string) string {
+	if isFacebookStoryURL(finalURL) {
+		author := metadata.Author
+		if !isUsableStoryAuthor(author) {
+			author = "facebook"
+		}
+
+		storyID := buildStoryIdentifier(metadata.CreatedAt, finalURL)
+		return core.GenerateFilename(author, "story", storyID, ext)
+	}
+
+	return core.GenerateFilenameWithMeta(metadata.Author, metadata.Title, metadata.Author, "", ext)
+}
+
+func isFacebookStoryURL(urlStr string) bool {
+	return strings.Contains(strings.ToLower(urlStr), "/stories/")
+}
+
+func extractFirstAuthor(html string, patterns []*regexp.Regexp, validator func(string) bool) string {
+	for _, pattern := range patterns {
+		if match := pattern.FindStringSubmatch(html); len(match) > 1 {
+			author := normalizeTextField(match[1])
+			if validator(author) {
+				return author
+			}
+		}
+	}
+
+	return ""
+}
+
+func isUsableGenericAuthor(author string) bool {
+	a := strings.TrimSpace(author)
+	if a == "" {
+		return false
+	}
+
+	return !strings.EqualFold(a, "facebook")
+}
+
+func isUsableStoryAuthor(author string) bool {
+	a := strings.TrimSpace(author)
+	if a == "" {
+		return false
+	}
+
+	lower := strings.ToLower(a)
+	if lower == "facebook" || lower == "story" || lower == "stories" || lower == "profile.php" || lower == "permalink" || lower == "watch" {
+		return false
+	}
+
+	if fbNumericRe.MatchString(lower) {
+		return false
+	}
+
+	return true
+}
+
+func extractStoryAuthorFromURL(finalURL string) string {
+	u, err := url.Parse(finalURL)
+	if err != nil {
+		return ""
+	}
+
+	segments := strings.Split(strings.Trim(u.Path, "/"), "/")
+	for i := 0; i < len(segments); i++ {
+		if strings.EqualFold(segments[i], "stories") && i+1 < len(segments) {
+			candidate, unescapeErr := url.PathUnescape(strings.TrimSpace(segments[i+1]))
+			if unescapeErr != nil {
+				candidate = strings.TrimSpace(segments[i+1])
+			}
+
+			if isUsableStoryAuthor(candidate) {
+				return normalizeTextField(candidate)
+			}
+		}
+	}
+
+	return ""
+}
+
+func hasUsableText(v string) bool {
+	return strings.TrimSpace(v) != ""
+}
+
+func extractCreatedAt(html string) string {
+	for _, pattern := range fbCreatedAtNumericPatterns {
+		if match := pattern.FindStringSubmatch(html); len(match) > 1 {
+			if ts := normalizeCreatedAt(match[1]); ts != "" {
+				return ts
+			}
+		}
+	}
+
+	for _, pattern := range fbCreatedAtStringPatterns {
+		if match := pattern.FindStringSubmatch(html); len(match) > 1 {
+			if ts := normalizeCreatedAt(match[1]); ts != "" {
+				return ts
+			}
+		}
+	}
+
+	return ""
+}
+
+func normalizeCreatedAt(raw string) string {
+	v := strings.TrimSpace(unescapeHTML(raw))
+	if v == "" {
+		return ""
+	}
+
+	if fbNumericRe.MatchString(v) {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return ""
+		}
+
+		if len(v) >= 13 {
+			n = n / 1000
+		}
+		if n <= 0 {
+			return ""
+		}
+
+		return time.Unix(n, 0).UTC().Format(time.RFC3339)
+	}
+
+	layouts := []string{
+		time.RFC3339,
+		"2006-01-02T15:04:05-0700",
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+	}
+
+	for _, layout := range layouts {
+		if parsed, err := time.Parse(layout, v); err == nil {
+			return parsed.UTC().Format(time.RFC3339)
+		}
+	}
+
+	return ""
+}
+
+func buildStoryIdentifier(createdAt, finalURL string) string {
+	if parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(createdAt)); err == nil {
+		return parsed.UTC().Format("20060102150405")
+	}
+
+	if storyID := extractStoryIDFromURL(finalURL); storyID != "" {
+		return storyID
+	}
+
+	return core.BuildFilenameID("", "")
+}
+
+func extractStoryIDFromURL(finalURL string) string {
+	u, err := url.Parse(finalURL)
+	if err != nil {
+		return ""
+	}
+
+	segments := strings.Split(strings.Trim(u.Path, "/"), "/")
+	for i := 0; i < len(segments); i++ {
+		if strings.EqualFold(segments[i], "stories") {
+			if i+2 < len(segments) {
+				id, unescapeErr := url.PathUnescape(strings.TrimSpace(segments[i+2]))
+				if unescapeErr != nil {
+					id = strings.TrimSpace(segments[i+2])
+				}
+				if id != "" {
+					return id
+				}
+			}
+			break
+		}
+	}
+
+	for _, key := range []string{"story_fbid", "fbid"} {
+		if v := strings.TrimSpace(u.Query().Get(key)); v != "" {
+			return v
+		}
+	}
+
+	return ""
+}
+
 func cleanFacebookTitle(title, author string) string {
 	clean := strings.TrimSpace(title)
 	if clean == "" {
@@ -582,6 +816,24 @@ func (e *FacebookExtractor) extractFormats(html string) []rawFormat {
 		}
 	}
 
+	// Priority 2.5: story progressive_url payloads
+	if len(formats) == 0 {
+		qualityPattern := regexp.MustCompile(`"progressive_url":"(https:[^"]+\.mp4[^"]*)","failure_reason":null,"metadata":\{"quality":"(HD|SD)"\}`)
+		for _, match := range qualityPattern.FindAllStringSubmatch(html, -1) {
+			if len(match) > 2 {
+				addFormat(match[2], match[1])
+			}
+		}
+	}
+	if len(formats) == 0 {
+		genericPattern := regexp.MustCompile(`"progressive_url":"(https:[^"]+\.mp4[^"]*)"`)
+		for _, match := range genericPattern.FindAllStringSubmatch(html, -1) {
+			if len(match) > 1 {
+				addFormat("HD", match[1])
+			}
+		}
+	}
+
 	// Priority 3: hd_src and sd_src
 	if len(formats) == 0 {
 		if matches := regexp.MustCompile(`"hd_src":"(https:[^"]+)"`).FindStringSubmatch(html); len(matches) > 1 {
@@ -618,6 +870,11 @@ func (e *FacebookExtractor) extractFormats(html string) []rawFormat {
 
 		// preferred_thumbnail
 		if matches := regexp.MustCompile(`"preferred_thumbnail":\{"uri":"(https:[^"]+)"`).FindStringSubmatch(html); len(matches) > 1 {
+			addFormat("Original", matches[1])
+		}
+
+		// Story image fallbacks
+		if matches := regexp.MustCompile(`"(?:previewImage|story_thumbnail|poster_image)":\{"uri":"(https:[^"]+)"`).FindStringSubmatch(html); len(matches) > 1 {
 			addFormat("Original", matches[1])
 		}
 

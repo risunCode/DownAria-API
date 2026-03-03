@@ -13,11 +13,11 @@ import (
 	"strings"
 	"time"
 
-	apperrors "downaria-api/internal/core/errors"
-	"downaria-api/internal/infra/network"
-	"downaria-api/internal/shared/util"
-	"downaria-api/internal/transport/http/middleware"
-	"downaria-api/pkg/response"
+	apperrors "fetchmoona/internal/core/errors"
+	"fetchmoona/internal/infra/network"
+	"fetchmoona/internal/shared/util"
+	"fetchmoona/internal/transport/http/middleware"
+	"fetchmoona/pkg/response"
 )
 
 const proxyHeadCacheTTL = 45 * time.Second
@@ -280,11 +280,7 @@ func resolveUpstreamAuthorization(r *http.Request) string {
 		return ""
 	}
 
-	if value := strings.TrimSpace(r.Header.Get("X-Upstream-Authorization")); value != "" {
-		return value
-	}
-
-	return strings.TrimSpace(r.URL.Query().Get("upstream_auth"))
+	return strings.TrimSpace(r.Header.Get("X-Upstream-Authorization"))
 }
 
 func buildProxyHeadCacheKey(targetURL string, authorization string, userAgent string) string {

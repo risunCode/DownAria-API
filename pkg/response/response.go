@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"downaria-api/internal/shared/util"
+	"fetchmoona/internal/shared/util"
 )
 
 const (

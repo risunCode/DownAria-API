@@ -1,7 +1,18 @@
 # CHANGELOG
 
-All notable changes to **DownAria-API** are documented in this file.
+All notable changes to **FetchMoona** are documented in this file.
 This format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
+
+## [1.1.1] - 2026-03-04
+
+### Changed
+- Origin middleware now fails closed when the allowlist is empty, and wildcard origin acceptance applies only when `*` is explicitly configured.
+- Proxy auth resolver now accepts upstream auth from header-only input (`X-Upstream-Authorization`) and ignores query token auth.
+- Synced integration/runtime docs to signed `/api/web/*` gateway behavior and current FetchMoona naming.
+- Synced local integration defaults in env/docs references  
+
+### Fixed
+- Added compatibility guard tests covering `X-Downaria-*` signature headers and filename branding fallback behavior.
 
 ## [1.1.0] - 2026-03-03
 
@@ -25,13 +36,13 @@ This format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 - Reduced false media-type detection by unifying variant/top-level classification logic.
-- Fixed malformed filename edge cases (mojibake noise, missing `[DownAria]` closing bracket) in merge/download paths.
+- Fixed malformed filename edge cases (mojibake noise, missing `[FetchMoona]` closing bracket) in merge/download paths.
 - Removed expensive full-stream size probing fallback in favor of bounded range probing.
 - Added direct `videoUrl+audioUrl` merge-path support for non-YouTube stream pair merge requests.
 
 ## [1.0.0] - 2026-03-03
 
-Initial unified production release of DownAria-API.
+Initial unified production release of FetchMoona.
 
 ### Added
 - Clean architecture layout across `internal/core`, `internal/app`, `internal/extractors`, `internal/infra`, and `internal/transport`.

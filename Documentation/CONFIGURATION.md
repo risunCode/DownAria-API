@@ -2,14 +2,16 @@
 
 Configuration is loaded from `internal/core/config/loader.go`.
 
+For local dev alignment with the current DownAria frontend runtime, use FE `http://localhost:3001` and BE `http://localhost:8081` in `.env` values.
+
 ## Runtime and security
 
 | Variable | Default | Notes |
 |---|---|---|
-| `PORT` | `8080` | Accepts `8080`, `:8080`, `host:port`, URL, or `tcp/8080`; normalized to numeric port. |
-| `ALLOWED_ORIGINS` | _(empty)_ | Comma-separated origin allowlist used by CORS and `/api/web/*` origin middleware. Empty behaves as allow-all in origin middleware. |
+| `PORT` | `8080` | Accepts `8080`, `:8080`, `host:port`, URL, or `tcp/8080`; normalized to numeric port. Local stack examples use `8081`. |
+| `ALLOWED_ORIGINS` | _(empty)_ | Comma-separated origin allowlist used by CORS and `/api/web/*` origin middleware. In `/api/web/*` origin middleware, an empty allowlist fails closed (no origins allowed). Use `*` explicitly to allow all origins. Include `http://localhost:3001` for default frontend dev origin. |
 | `TRUSTED_PROXY_CIDRS` | _(empty)_ | Comma-separated trusted proxy CIDRs/IPs for client IP resolution in rate limiting and stats. |
-| `WEB_INTERNAL_SHARED_SECRET` | _(empty in loader)_ | Required by `cmd/server/main.go` at startup; used to verify `/api/web/*` signatures. |
+| `WEB_INTERNAL_SHARED_SECRET` | _(empty in loader)_ | Required by `cmd/server/main.go` at startup; used to verify signed `/api/web/*` requests. When set, `POST /api/v1/merge` is not registered. |
 | `PUBLIC_BASE_URL` | `http://localhost:<PORT>` | Returned by `/api/settings`. |
 
 ## Rate limiting
@@ -61,11 +63,11 @@ Configuration is loaded from `internal/core/config/loader.go`.
 ## Example `.env`
 
 ```env
-PORT=8080
-ALLOWED_ORIGINS=http://127.0.0.1:3000,http://localhost:3000
+PORT=8081
+ALLOWED_ORIGINS=http://localhost:3001,http://127.0.0.1:3001
 TRUSTED_PROXY_CIDRS=127.0.0.1/32,10.0.0.0/8
 WEB_INTERNAL_SHARED_SECRET=replace-with-random-secret
-PUBLIC_BASE_URL=https://api.example.com
+PUBLIC_BASE_URL=http://localhost:8081
 
 UPSTREAM_TIMEOUT_MS=15000
 SERVER_READ_TIMEOUT=15s

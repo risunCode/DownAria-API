@@ -8,18 +8,72 @@ import (
 	"net/url"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
-	"downaria-api/internal/extractors/core"
-	"downaria-api/internal/shared/util"
+	"fetchmoona/internal/extractors/core"
+	"fetchmoona/internal/shared/util"
 )
 
-const SyndicationAPI = "https://cdn.syndication.twimg.com/tweet-result"
+const (
+	SyndicationAPI         = "https://cdn.syndication.twimg.com/tweet-result"
+	twitterGraphQLEndpoint = "https://x.com/i/api/graphql"
+	twitterGraphQLQueryID  = "xOhkmRac04YFZmOzU9PJHg"
+	twitterBearerToken     = "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA"
+)
+
+var twitterGraphQLFeatures = map[string]bool{
+	"creator_subscriptions_tweet_preview_api_enabled":                         true,
+	"c9s_tweet_anatomy_moderator_badge_enabled":                               true,
+	"tweetypie_unmention_optimization_enabled":                                true,
+	"responsive_web_edit_tweet_api_enabled":                                   true,
+	"graphql_is_translatable_rweb_tweet_is_translatable_enabled":              true,
+	"view_counts_everywhere_api_enabled":                                      true,
+	"longform_notetweets_consumption_enabled":                                 true,
+	"responsive_web_twitter_article_tweet_consumption_enabled":                false,
+	"tweet_awards_web_tipping_enabled":                                        false,
+	"responsive_web_home_pinned_timelines_enabled":                            true,
+	"freedom_of_speech_not_reach_fetch_enabled":                               true,
+	"standardized_nudges_misinfo":                                             true,
+	"tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled": true,
+	"longform_notetweets_rich_text_read_enabled":                              true,
+	"longform_notetweets_inline_media_enabled":                                true,
+	"responsive_web_graphql_exclude_directive_enabled":                        true,
+	"verified_phone_label_enabled":                                            false,
+	"responsive_web_media_download_video_enabled":                             false,
+	"responsive_web_graphql_skip_user_profile_image_extensions_enabled":       false,
+	"responsive_web_graphql_timeline_navigation_enabled":                      true,
+	"responsive_web_enhance_cards_enabled":                                    false,
+}
 
 var tweetIDRegex = regexp.MustCompile(`/status/(\d+)`)
 
 type TwitterExtractor struct {
 	*core.BaseExtractor
+}
+
+type twitterVariant struct {
+	Bitrate int
+	URL     string
+}
+
+type twitterMediaDetail struct {
+	Type          string
+	MediaURLHTTPS string
+	VideoVariants []twitterVariant
+}
+
+type twitterExtractData struct {
+	TweetID           string
+	Text              string
+	AuthorName        string
+	AuthorScreenName  string
+	FavoriteCount     int64
+	RetweetCount      int64
+	ReplyCount        int64
+	ConversationCount int64
+	ViewsCount        int64
+	MediaDetails      []twitterMediaDetail
 }
 
 func NewTwitterExtractor() *TwitterExtractor {
@@ -44,9 +98,29 @@ func (e *TwitterExtractor) Extract(urlStr string, opts core.ExtractOptions) (*co
 		return nil, fmt.Errorf("invalid twitter URL: tweet ID not found")
 	}
 
-	// 2. Fetch via Syndication API (Public, no auth)
+	if syndication, err := e.fetchSyndicationExtractData(tweetID, opts); err == nil && len(syndication.MediaDetails) > 0 {
+		return e.buildResult(urlStr, syndication, opts), nil
+	}
+
+	if strings.TrimSpace(opts.Cookie) != "" {
+		graphqlData, err := e.fetchGraphQLExtractData(tweetID, opts)
+		if err == nil && len(graphqlData.MediaDetails) > 0 {
+			return e.buildResult(urlStr, graphqlData, opts), nil
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return nil, fmt.Errorf("no media found in tweet")
+}
+
+func (e *TwitterExtractor) fetchSyndicationExtractData(tweetID string, opts core.ExtractOptions) (*twitterExtractData, error) {
 	apiURL := fmt.Sprintf("%s?id=%s&token=0", SyndicationAPI, tweetID)
-	resp, err := e.MakeRequest("GET", apiURL, nil, opts, nil)
+	resp, err := e.MakeRequest(http.MethodGet, apiURL, nil, opts, map[string]string{
+		"Accept":  "application/json",
+		"Referer": "https://platform.twitter.com/",
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -56,8 +130,8 @@ func (e *TwitterExtractor) Extract(urlStr string, opts core.ExtractOptions) (*co
 		return nil, err
 	}
 
-	// 3. Parse Response
-	var data struct {
+	var payload struct {
+		Typename string `json:"__typename"`
 		Text     string `json:"text"`
 		FullText string `json:"full_text"`
 
@@ -71,6 +145,7 @@ func (e *TwitterExtractor) Extract(urlStr string, opts core.ExtractOptions) (*co
 			Name       string `json:"name"`
 			ScreenName string `json:"screen_name"`
 		} `json:"user"`
+
 		MediaDetails []struct {
 			Type          string `json:"type"`
 			MediaURLHTTPS string `json:"media_url_https"`
@@ -81,6 +156,7 @@ func (e *TwitterExtractor) Extract(urlStr string, opts core.ExtractOptions) (*co
 				} `json:"variants"`
 			} `json:"video_info"`
 		} `json:"media_details"`
+
 		MediaDetailsCamel []struct {
 			Type          string `json:"type"`
 			MediaURLHTTPS string `json:"media_url_https"`
@@ -93,13 +169,17 @@ func (e *TwitterExtractor) Extract(urlStr string, opts core.ExtractOptions) (*co
 		} `json:"mediaDetails"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return nil, err
 	}
 
-	mediaDetails := data.MediaDetails
-	if len(mediaDetails) == 0 && len(data.MediaDetailsCamel) > 0 {
-		mediaDetails = make([]struct {
+	if strings.EqualFold(strings.TrimSpace(payload.Typename), "TweetTombstone") {
+		return nil, fmt.Errorf("no media found in tweet")
+	}
+
+	mediaSource := payload.MediaDetails
+	if len(mediaSource) == 0 && len(payload.MediaDetailsCamel) > 0 {
+		mediaSource = make([]struct {
 			Type          string `json:"type"`
 			MediaURLHTTPS string `json:"media_url_https"`
 			VideoInfo     struct {
@@ -108,74 +188,459 @@ func (e *TwitterExtractor) Extract(urlStr string, opts core.ExtractOptions) (*co
 					URL     string `json:"url"`
 				} `json:"variants"`
 			} `json:"video_info"`
-		}, len(data.MediaDetailsCamel))
-		copy(mediaDetails, data.MediaDetailsCamel)
+		}, len(payload.MediaDetailsCamel))
+		copy(mediaSource, payload.MediaDetailsCamel)
+	}
+
+	mediaDetails := make([]twitterMediaDetail, 0, len(mediaSource))
+	for _, item := range mediaSource {
+		mediaType := strings.ToLower(strings.TrimSpace(item.Type))
+		entry := twitterMediaDetail{
+			Type:          mediaType,
+			MediaURLHTTPS: strings.TrimSpace(item.MediaURLHTTPS),
+		}
+
+		for _, variant := range item.VideoInfo.Variants {
+			variantURL := strings.TrimSpace(variant.URL)
+			if variantURL == "" {
+				continue
+			}
+			if strings.Contains(variantURL, ".mp4") || strings.Contains(variantURL, ".m3u8") {
+				entry.VideoVariants = append(entry.VideoVariants, twitterVariant{Bitrate: variant.Bitrate, URL: variantURL})
+			}
+		}
+
+		if mediaType == "video" || mediaType == "animated_gif" {
+			if len(entry.VideoVariants) == 0 {
+				continue
+			}
+		}
+
+		if mediaType == "photo" && entry.MediaURLHTTPS == "" {
+			continue
+		}
+
+		if mediaType != "photo" && mediaType != "video" && mediaType != "animated_gif" {
+			continue
+		}
+
+		mediaDetails = append(mediaDetails, entry)
 	}
 
 	if len(mediaDetails) == 0 {
 		return nil, fmt.Errorf("no media found in tweet")
 	}
 
-	// 4. Build Result using ResponseBuilder
+	return &twitterExtractData{
+		TweetID:           tweetID,
+		Text:              pickFirstNonEmpty(payload.FullText, payload.Text),
+		AuthorName:        payload.User.Name,
+		AuthorScreenName:  payload.User.ScreenName,
+		FavoriteCount:     sanitizeStat(payload.FavoriteCount),
+		RetweetCount:      sanitizeStat(payload.RetweetCount),
+		ReplyCount:        sanitizeStat(payload.ReplyCount),
+		ConversationCount: sanitizeStat(payload.ConversationCount),
+		ViewsCount:        sanitizeStat(parseViewsCount(payload.ViewsCount)),
+		MediaDetails:      mediaDetails,
+	}, nil
+}
+
+func (e *TwitterExtractor) fetchGraphQLExtractData(tweetID string, opts core.ExtractOptions) (*twitterExtractData, error) {
+	ct0 := extractCt0Token(opts.Cookie)
+	if ct0 == "" {
+		return nil, fmt.Errorf("login required: missing ct0 token")
+	}
+
+	apiURL, err := buildGraphQLURL(tweetID)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := e.MakeRequest(http.MethodGet, apiURL, nil, opts, map[string]string{
+		"Accept":                    "*/*",
+		"Authorization":             twitterBearerToken,
+		"X-Csrf-Token":              ct0,
+		"X-Twitter-Auth-Type":       "OAuth2Session",
+		"X-Twitter-Active-User":     "yes",
+		"X-Twitter-Client-Language": "en",
+		"Origin":                    "https://x.com",
+		"Referer":                   "https://x.com/",
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
+	}
+
+	var payload map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+
+	return parseGraphQLPayload(payload, tweetID)
+}
+
+func (e *TwitterExtractor) buildResult(urlStr string, data *twitterExtractData, opts core.ExtractOptions) *core.ExtractResult {
+	if data == nil {
+		data = &twitterExtractData{}
+	}
+
+	tweetID := pickFirstNonEmpty(data.TweetID, e.extractTweetID(urlStr))
+	text := strings.TrimSpace(data.Text)
+	authorName := strings.TrimSpace(data.AuthorName)
+	authorScreenName := strings.TrimSpace(data.AuthorScreenName)
+
+	mediaType := core.MediaTypePost
+	for _, media := range data.MediaDetails {
+		if media.Type == "video" || media.Type == "animated_gif" {
+			mediaType = core.MediaTypeVideo
+			break
+		}
+	}
+
 	builder := core.NewResponseBuilder(urlStr).
 		WithPlatform("twitter").
-		WithMediaType(core.MediaTypePost).
-		WithAuthor(data.User.Name, data.User.ScreenName).
-		WithContent(tweetID, pickFirstNonEmpty(data.FullText, data.Text), pickFirstNonEmpty(data.FullText, data.Text)).
+		WithMediaType(mediaType).
+		WithAuthor(authorName, authorScreenName).
+		WithContent(tweetID, text, text).
 		WithEngagement(
-			sanitizeStat(parseViewsCount(data.ViewsCount)),
+			sanitizeStat(data.ViewsCount),
 			sanitizeStat(data.FavoriteCount),
 			sanitizeStat(e.resolveReplyCount(data.ReplyCount, data.ConversationCount)),
 			sanitizeStat(data.RetweetCount),
 		).
 		WithAuthentication(opts.Cookie != "", opts.Source)
 
-	for i, m := range mediaDetails {
-		media := core.NewMedia(i, core.MediaTypeImage, m.MediaURLHTTPS)
-		if m.Type == "video" || m.Type == "animated_gif" {
+	filenameSeed := pickFirstNonEmpty(authorScreenName, authorName, "twitter")
+
+	for idx, item := range data.MediaDetails {
+		media := core.NewMedia(idx, core.MediaTypeImage, item.MediaURLHTTPS)
+		if item.Type == "video" || item.Type == "animated_gif" {
 			media.Type = core.MediaTypeVideo
 
-			// Collect all MP4 variants with bitrate info
-			type variantInfo struct {
-				Bitrate int
-				URL     string
-			}
-			var variants []variantInfo
-
-			for _, v := range m.VideoInfo.Variants {
-				if strings.Contains(v.URL, ".mp4") {
-					variants = append(variants, variantInfo{
-						Bitrate: v.Bitrate,
-						URL:     v.URL,
-					})
+			variants := make([]twitterVariant, 0, len(item.VideoVariants))
+			seen := map[string]struct{}{}
+			for _, variant := range item.VideoVariants {
+				variantURL := strings.TrimSpace(variant.URL)
+				if variantURL == "" {
+					continue
 				}
+				if _, exists := seen[variantURL]; exists {
+					continue
+				}
+				seen[variantURL] = struct{}{}
+				variants = append(variants, twitterVariant{Bitrate: variant.Bitrate, URL: variantURL})
 			}
 
-			// Sort by bitrate descending (highest quality first)
 			sort.Slice(variants, func(i, j int) bool {
 				return variants[i].Bitrate > variants[j].Bitrate
 			})
 
-			// Create variant for each quality
-			for _, v := range variants {
-				quality := getQualityLabel(v.Bitrate)
-				variant := core.NewVideoVariant(quality, v.URL).
-					WithBitrate(v.Bitrate)
-
-				filename := core.GenerateFilenameWithMeta(data.User.ScreenName, pickFirstNonEmpty(data.FullText, data.Text), data.User.ScreenName, tweetID, "mp4")
+			for _, variantInfo := range variants {
+				quality := getQualityLabel(variantInfo.Bitrate)
+				variant := core.NewVideoVariant(quality, variantInfo.URL).WithBitrate(variantInfo.Bitrate)
+				filename := core.GenerateFilenameWithMeta(filenameSeed, text, authorScreenName, tweetID, "mp4")
 				variant = variant.WithFilename(filename)
 				core.AddVariant(&media, variant)
 			}
 		} else {
-			variant := core.NewImageVariant("Original", m.MediaURLHTTPS)
-			filename := core.GenerateFilenameWithMeta(data.User.ScreenName, pickFirstNonEmpty(data.FullText, data.Text), data.User.ScreenName, tweetID, "jpg")
+			variant := core.NewImageVariant("Original", item.MediaURLHTTPS)
+			filename := core.GenerateFilenameWithMeta(filenameSeed, text, authorScreenName, tweetID, "jpg")
 			variant = variant.WithFilename(filename)
 			core.AddVariant(&media, variant)
 		}
 		builder.AddMedia(media)
 	}
 
-	return builder.Build(), nil
+	return builder.Build()
+}
+
+func buildGraphQLURL(tweetID string) (string, error) {
+	variables := map[string]interface{}{
+		"focalTweetId":                           tweetID,
+		"with_rux_injections":                    false,
+		"includePromotedContent":                 true,
+		"withCommunity":                          true,
+		"withQuickPromoteEligibilityTweetFields": true,
+		"withBirdwatchNotes":                     true,
+		"withVoice":                              true,
+		"withV2Timeline":                         true,
+	}
+
+	variablesJSON, err := json.Marshal(variables)
+	if err != nil {
+		return "", err
+	}
+	featuresJSON, err := json.Marshal(twitterGraphQLFeatures)
+	if err != nil {
+		return "", err
+	}
+
+	return fmt.Sprintf("%s/%s/TweetDetail?variables=%s&features=%s",
+		twitterGraphQLEndpoint,
+		twitterGraphQLQueryID,
+		url.QueryEscape(string(variablesJSON)),
+		url.QueryEscape(string(featuresJSON)),
+	), nil
+}
+
+func extractCt0Token(cookie string) string {
+	parts := strings.Split(cookie, ";")
+	for _, part := range parts {
+		pair := strings.TrimSpace(part)
+		if strings.HasPrefix(pair, "ct0=") {
+			return strings.TrimSpace(strings.TrimPrefix(pair, "ct0="))
+		}
+	}
+	return ""
+}
+
+func parseGraphQLPayload(payload map[string]interface{}, targetTweetID string) (*twitterExtractData, error) {
+	var candidates []*twitterExtractData
+	collectGraphQLCandidates(payload, &candidates)
+	if len(candidates) == 0 {
+		return nil, fmt.Errorf("no media found in tweet")
+	}
+
+	best := candidates[0]
+	for _, candidate := range candidates[1:] {
+		if isBetterGraphQLCandidate(candidate, best, targetTweetID) {
+			best = candidate
+		}
+	}
+
+	if best == nil || len(best.MediaDetails) == 0 {
+		return nil, fmt.Errorf("no media found in tweet")
+	}
+
+	if best.TweetID == "" {
+		best.TweetID = targetTweetID
+	}
+
+	return best, nil
+}
+
+func collectGraphQLCandidates(node interface{}, candidates *[]*twitterExtractData) {
+	switch value := node.(type) {
+	case map[string]interface{}:
+		if candidate := graphQLCandidateFromNode(value); candidate != nil {
+			*candidates = append(*candidates, candidate)
+		}
+		for _, nested := range value {
+			collectGraphQLCandidates(nested, candidates)
+		}
+	case []interface{}:
+		for _, nested := range value {
+			collectGraphQLCandidates(nested, candidates)
+		}
+	}
+}
+
+func graphQLCandidateFromNode(node map[string]interface{}) *twitterExtractData {
+	legacy := asMap(node["legacy"])
+	if legacy == nil {
+		return nil
+	}
+
+	mediaDetails := parseGraphQLMedia(legacy)
+	if len(mediaDetails) == 0 {
+		return nil
+	}
+
+	authorName, authorScreenName := parseGraphQLAuthor(node)
+
+	return &twitterExtractData{
+		TweetID:           strings.TrimSpace(asString(node["rest_id"])),
+		Text:              pickFirstNonEmpty(asString(legacy["full_text"]), asString(legacy["text"])),
+		AuthorName:        authorName,
+		AuthorScreenName:  authorScreenName,
+		FavoriteCount:     sanitizeStat(asInt64(legacy["favorite_count"])),
+		RetweetCount:      sanitizeStat(asInt64(legacy["retweet_count"])),
+		ReplyCount:        sanitizeStat(asInt64(legacy["reply_count"])),
+		ConversationCount: sanitizeStat(asInt64(legacy["conversation_count"])),
+		ViewsCount:        sanitizeStat(parseViewsUnknown(node["views"])),
+		MediaDetails:      mediaDetails,
+	}
+}
+
+func parseGraphQLMedia(legacy map[string]interface{}) []twitterMediaDetail {
+	mediaItems := asSlice(asMap(legacy["extended_entities"])["media"])
+	if len(mediaItems) == 0 {
+		mediaItems = asSlice(asMap(legacy["entities"])["media"])
+	}
+
+	mediaDetails := make([]twitterMediaDetail, 0, len(mediaItems))
+	for _, mediaNode := range mediaItems {
+		mediaMap := asMap(mediaNode)
+		if mediaMap == nil {
+			continue
+		}
+
+		mediaType := strings.ToLower(strings.TrimSpace(asString(mediaMap["type"])))
+		if mediaType == "" {
+			continue
+		}
+
+		detail := twitterMediaDetail{
+			Type:          mediaType,
+			MediaURLHTTPS: strings.TrimSpace(asString(mediaMap["media_url_https"])),
+		}
+
+		videoInfo := asMap(mediaMap["video_info"])
+		variantsRaw := asSlice(videoInfo["variants"])
+		seen := map[string]struct{}{}
+		for _, variantNode := range variantsRaw {
+			variantMap := asMap(variantNode)
+			if variantMap == nil {
+				continue
+			}
+			variantURL := strings.TrimSpace(asString(variantMap["url"]))
+			if variantURL == "" {
+				continue
+			}
+			if _, exists := seen[variantURL]; exists {
+				continue
+			}
+			if strings.Contains(variantURL, ".mp4") || strings.Contains(variantURL, ".m3u8") {
+				seen[variantURL] = struct{}{}
+				detail.VideoVariants = append(detail.VideoVariants, twitterVariant{
+					Bitrate: int(asInt64(variantMap["bitrate"])),
+					URL:     variantURL,
+				})
+			}
+		}
+
+		if mediaType == "video" || mediaType == "animated_gif" {
+			if len(detail.VideoVariants) == 0 {
+				continue
+			}
+		}
+
+		if mediaType == "photo" && detail.MediaURLHTTPS == "" {
+			continue
+		}
+
+		if mediaType != "photo" && mediaType != "video" && mediaType != "animated_gif" {
+			continue
+		}
+
+		mediaDetails = append(mediaDetails, detail)
+	}
+
+	return mediaDetails
+}
+
+func parseGraphQLAuthor(node map[string]interface{}) (name string, screenName string) {
+	coreNode := asMap(node["core"])
+	userResults := asMap(coreNode["user_results"])
+	result := asMap(userResults["result"])
+	legacy := asMap(result["legacy"])
+	if legacy == nil {
+		legacy = asMap(asMap(result["result"])["legacy"])
+	}
+	if legacy == nil {
+		return "", ""
+	}
+
+	return strings.TrimSpace(asString(legacy["name"])), strings.TrimSpace(asString(legacy["screen_name"]))
+}
+
+func isBetterGraphQLCandidate(candidate, current *twitterExtractData, targetTweetID string) bool {
+	if current == nil {
+		return true
+	}
+
+	candidateMatch := strings.TrimSpace(candidate.TweetID) == strings.TrimSpace(targetTweetID)
+	currentMatch := strings.TrimSpace(current.TweetID) == strings.TrimSpace(targetTweetID)
+	if candidateMatch != currentMatch {
+		return candidateMatch
+	}
+
+	if len(candidate.MediaDetails) != len(current.MediaDetails) {
+		return len(candidate.MediaDetails) > len(current.MediaDetails)
+	}
+
+	return candidate.ViewsCount > current.ViewsCount
+}
+
+func parseViewsUnknown(value interface{}) int64 {
+	if value == nil {
+		return 0
+	}
+	if direct := parseUnknownInt(value); direct > 0 {
+		return direct
+	}
+	valueMap := asMap(value)
+	if valueMap == nil {
+		return 0
+	}
+	if count := parseUnknownInt(valueMap["count"]); count > 0 {
+		return count
+	}
+	if value := parseUnknownInt(valueMap["value"]); value > 0 {
+		return value
+	}
+	return 0
+}
+
+func asMap(value interface{}) map[string]interface{} {
+	if value == nil {
+		return nil
+	}
+	if out, ok := value.(map[string]interface{}); ok {
+		return out
+	}
+	return nil
+}
+
+func asSlice(value interface{}) []interface{} {
+	if value == nil {
+		return nil
+	}
+	if out, ok := value.([]interface{}); ok {
+		return out
+	}
+	return nil
+}
+
+func asString(value interface{}) string {
+	if value == nil {
+		return ""
+	}
+	switch v := value.(type) {
+	case string:
+		return v
+	case json.Number:
+		return v.String()
+	case float64:
+		return strconv.FormatInt(int64(v), 10)
+	case float32:
+		return strconv.FormatInt(int64(v), 10)
+	case int:
+		return strconv.Itoa(v)
+	case int64:
+		return strconv.FormatInt(v, 10)
+	case int32:
+		return strconv.FormatInt(int64(v), 10)
+	case uint64:
+		return strconv.FormatUint(v, 10)
+	case uint32:
+		return strconv.FormatUint(uint64(v), 10)
+	case uint:
+		return strconv.FormatUint(uint64(v), 10)
+	default:
+		return ""
+	}
+}
+
+func asInt64(value interface{}) int64 {
+	if value == nil {
+		return 0
+	}
+	return parseUnknownInt(value)
 }
 
 func (e *TwitterExtractor) extractTweetID(urlStr string) string {

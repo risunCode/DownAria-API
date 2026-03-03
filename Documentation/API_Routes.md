@@ -48,6 +48,7 @@ Note: proxy and merge endpoints may return binary streams.
 ## 2) Route groups: `/api/web/*` vs `/api/v1/*`
 
 Core endpoints are exposed under two prefixes with the same handlers.
+Primary frontend runtime flow targets signed `/api/web/*` routes.
 
 ### `/api/web/*` (frontend-protected)
 
@@ -71,6 +72,7 @@ Additional middleware on this group:
 - `POST /api/v1/merge` (registered only when `WEB_INTERNAL_SHARED_SECRET` is empty)
 
 The `/api/v1/*` group does not apply origin-protection or anti-bot middleware.
+`POST /api/v1/merge` should be treated as conditional compatibility mode, not the default production runtime path.
 
 ---
 
@@ -112,22 +114,32 @@ The `/api/v1/*` group does not apply origin-protection or anti-bot middleware.
 - Response is a binary attachment stream.
 - Merge output size is capped by `MAX_MERGE_OUTPUT_SIZE_MB`.
 - Response includes `Content-Disposition: attachment` with resolved output filename.
+- Runtime default is signed `POST /api/web/merge`; public `POST /api/v1/merge` is conditional (only when `WEB_INTERNAL_SHARED_SECRET` is unset).
 
 Examples:
 
 ```bash
-# Video merge (fast-path)
-curl -X POST "http://localhost:8080/api/v1/merge" \
+# Video merge (fast-path, signed web route)
+curl -X POST "http://localhost:8081/api/web/merge" \
+  -H "X-Downaria-Timestamp: <unix-seconds>" \
+  -H "X-Downaria-Nonce: <random-nonce>" \
+  -H "X-Downaria-Signature: <hmac-signature>" \
   -H "Content-Type: application/json" \
   -d '{"url":"https://www.youtube.com/watch?v=dQw4w9WgXcQ","quality":"1080p","format":"mp4"}'
 
-# Audio-only (M4A)
-curl -X POST "http://localhost:8080/api/v1/merge" \
+# Audio-only (M4A, signed web route)
+curl -X POST "http://localhost:8081/api/web/merge" \
+  -H "X-Downaria-Timestamp: <unix-seconds>" \
+  -H "X-Downaria-Nonce: <random-nonce>" \
+  -H "X-Downaria-Signature: <hmac-signature>" \
   -H "Content-Type: application/json" \
   -d '{"url":"https://www.youtube.com/watch?v=dQw4w9WgXcQ","format":"m4a","filename":"track.m4a"}'
 
-# Direct pair merge (non-YouTube streams)
-curl -X POST "http://localhost:8080/api/v1/merge" \
+# Direct pair merge (non-YouTube streams, signed web route)
+curl -X POST "http://localhost:8081/api/web/merge" \
+  -H "X-Downaria-Timestamp: <unix-seconds>" \
+  -H "X-Downaria-Nonce: <random-nonce>" \
+  -H "X-Downaria-Signature: <hmac-signature>" \
   -H "Content-Type: application/json" \
   -d '{"videoUrl":"https://cdn.example.com/video.m3u8","audioUrl":"https://cdn.example.com/audio.m3u8","filename":"clip.mp4"}'
 ```

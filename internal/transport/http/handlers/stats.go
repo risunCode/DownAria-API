@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"time"
 
-	"downaria-api/internal/shared/util"
-	"downaria-api/pkg/response"
+	"fetchmoona/internal/shared/util"
+	"fetchmoona/pkg/response"
 )
 
 func (h *Handler) PublicStats(w http.ResponseWriter, r *http.Request) {

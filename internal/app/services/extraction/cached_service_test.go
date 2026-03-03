@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"downaria-api/internal/extractors/core"
-	"downaria-api/internal/infra/cache"
+	"fetchmoona/internal/extractors/core"
+	"fetchmoona/internal/infra/cache"
 )
 
 type mockCachedNextService struct {

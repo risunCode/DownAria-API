@@ -15,15 +15,15 @@ import (
 	"testing"
 	"time"
 
-	"downaria-api/internal/app/services/extraction"
-	"downaria-api/internal/core/config"
-	apperrors "downaria-api/internal/core/errors"
-	"downaria-api/internal/core/ports"
-	"downaria-api/internal/extractors/core"
-	"downaria-api/internal/extractors/registry"
-	"downaria-api/internal/infra/cache"
-	"downaria-api/internal/infra/network"
-	"downaria-api/internal/shared/security"
+	"fetchmoona/internal/app/services/extraction"
+	"fetchmoona/internal/core/config"
+	apperrors "fetchmoona/internal/core/errors"
+	"fetchmoona/internal/core/ports"
+	"fetchmoona/internal/extractors/core"
+	"fetchmoona/internal/extractors/registry"
+	"fetchmoona/internal/infra/cache"
+	"fetchmoona/internal/infra/network"
+	"fetchmoona/internal/shared/security"
 )
 
 type integrationResolver struct{}

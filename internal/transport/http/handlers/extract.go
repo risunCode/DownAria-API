@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"downaria-api/internal/app/services/extraction"
-	apperrors "downaria-api/internal/core/errors"
-	"downaria-api/internal/transport/http/middleware"
-	"downaria-api/pkg/response"
+	"fetchmoona/internal/app/services/extraction"
+	apperrors "fetchmoona/internal/core/errors"
+	"fetchmoona/internal/transport/http/middleware"
+	"fetchmoona/pkg/response"
 )
 
 type extractRequest struct {
@@ -55,6 +55,8 @@ func (h *Handler) Extract(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.URL = validatedURL
+
+	builder.WithCookieSource(cookieSourceLabel(strings.TrimSpace(req.Cookie)))
 
 	result, err := h.extractor.Extract(r.Context(), extraction.ExtractInput{
 		URL:    req.URL,

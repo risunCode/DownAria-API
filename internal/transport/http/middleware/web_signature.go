@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	apperrors "downaria-api/internal/core/errors"
-	"downaria-api/pkg/response"
+	apperrors "fetchmoona/internal/core/errors"
+	"fetchmoona/pkg/response"
 )
 
 const (

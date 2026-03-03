@@ -9,8 +9,8 @@ import (
 	"net/url"
 	"strings"
 
-	"downaria-api/internal/extractors/core"
-	"downaria-api/internal/shared/util"
+	"fetchmoona/internal/extractors/core"
+	"fetchmoona/internal/shared/util"
 )
 
 const TikWMAPI = "https://www.tikwm.com/api/"

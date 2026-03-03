@@ -1,6 +1,6 @@
 package handlers
 
-import "downaria-api/internal/shared/security"
+import "fetchmoona/internal/shared/security"
 
 func redactLogValue(value string) string {
 	return security.RedactLogValue(value)

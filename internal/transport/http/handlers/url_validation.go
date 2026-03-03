@@ -3,7 +3,7 @@ package handlers
 import (
 	"context"
 
-	"downaria-api/internal/shared/security"
+	"fetchmoona/internal/shared/security"
 )
 
 func (h *Handler) sanitizeAndValidateOutboundURL(ctx context.Context, raw string) (string, error) {

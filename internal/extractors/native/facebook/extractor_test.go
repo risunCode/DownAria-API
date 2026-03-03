@@ -1,6 +1,9 @@
 package facebook
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestExtractMetadata_FallbackStatsFromTitleAndTitleCleanup(t *testing.T) {
 	e := NewFacebookExtractor()
@@ -55,5 +58,81 @@ func TestExtractMetadata_DecodesJSONUnicodeEscapes(t *testing.T) {
 	}
 	if m.Author != "Vương" {
 		t.Fatalf("expected decoded unicode author, got %q", m.Author)
+	}
+}
+
+func TestExtractFormats_ProgressiveStoryURLs(t *testing.T) {
+	e := NewFacebookExtractor()
+	html := `"progressive_url":"https:\/\/video.cdn.test\/story_hd.mp4?_nc_cat=1","failure_reason":null,"metadata":{"quality":"HD"}`
+
+	formats := e.extractFormats(html)
+	if len(formats) == 0 {
+		t.Fatalf("expected at least one format from progressive_url")
+	}
+	if formats[0].Quality != "HD" {
+		t.Fatalf("expected quality HD, got %q", formats[0].Quality)
+	}
+	if formats[0].URL != "https://video.cdn.test/story_hd.mp4?_nc_cat=1" {
+		t.Fatalf("unexpected URL after unescape: %q", formats[0].URL)
+	}
+}
+
+func TestCheckLoginRequired_DoesNotFailWhenProgressiveMediaPresent(t *testing.T) {
+	e := NewFacebookExtractor()
+	html := `<html><body>login.php "progressive_url":"https:\/\/video.cdn.test\/story_sd.mp4"</body></html>`
+
+	if err := e.checkLoginRequired(html); err != nil {
+		t.Fatalf("expected no login-required error when progressive media exists, got %v", err)
+	}
+}
+
+func TestExtractMetadata_StoryAuthorFromStoryBucketOwner(t *testing.T) {
+	e := NewFacebookExtractor()
+	html := `<html><body><script>"story_bucket_owner":{"__typename":"User","id":"1001","name":"Story Author"}</script></body></html>`
+
+	m := e.extractMetadata(html, "https://www.facebook.com/stories/ignored_user/123456789")
+	if m.Author != "Story Author" {
+		t.Fatalf("expected story author from story_bucket_owner, got %q", m.Author)
+	}
+}
+
+func TestExtractMetadata_StoryTitleFallbackToStoryWhenMissing(t *testing.T) {
+	e := NewFacebookExtractor()
+	html := `<html><body><script>"story_bucket_owner":{"name":"Jane"}</script></body></html>`
+
+	m := e.extractMetadata(html, "https://www.facebook.com/stories/jane/123456789")
+	if m.Title != "story" {
+		t.Fatalf("expected story title fallback to 'story', got %q", m.Title)
+	}
+}
+
+func TestExtractMetadata_StoryCapturesCreationTimestamp(t *testing.T) {
+	e := NewFacebookExtractor()
+	html := `<html><body><script>"creation_time":1709518123</script></body></html>`
+
+	m := e.extractMetadata(html, "https://www.facebook.com/stories/jane/123456789")
+	if m.CreatedAt != "2024-03-04T02:08:43Z" {
+		t.Fatalf("expected normalized createdAt from creation_time, got %q", m.CreatedAt)
+	}
+}
+
+func TestBuildVariantFilename_StoryContainsAuthorMarkerAndTimestamp(t *testing.T) {
+	e := NewFacebookExtractor()
+	meta := fbMetadata{
+		Author:    "Jane Doe",
+		Title:     "",
+		CreatedAt: "2026-03-03T18:31:40Z",
+	}
+
+	filename := e.buildVariantFilename(meta, "https://www.facebook.com/stories/jane.doe/99887766554433/", "mp4")
+
+	if !strings.HasSuffix(filename, "_[DownAria].mp4") {
+		t.Fatalf("expected branded mp4 filename suffix, got %q", filename)
+	}
+	if !strings.Contains(filename, "jane_doe_story_") {
+		t.Fatalf("expected story filename to include author + story marker, got %q", filename)
+	}
+	if !strings.Contains(filename, "20260303183140") {
+		t.Fatalf("expected story filename to include timestamp/id segment, got %q", filename)
 	}
 }

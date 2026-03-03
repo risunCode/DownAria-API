@@ -3,8 +3,8 @@ package middleware
 import (
 	"net/http"
 
-	apperrors "downaria-api/internal/core/errors"
-	"downaria-api/pkg/response"
+	apperrors "fetchmoona/internal/core/errors"
+	"fetchmoona/pkg/response"
 )
 
 func RequireMergeEnabled(enabled bool) func(http.Handler) http.Handler {

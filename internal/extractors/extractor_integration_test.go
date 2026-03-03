@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"downaria-api/internal/extractors/core"
-	"downaria-api/internal/extractors/registry"
+	"fetchmoona/internal/extractors/core"
+	"fetchmoona/internal/extractors/registry"
 )
 
 func skipIfNotIntegration(t *testing.T) {

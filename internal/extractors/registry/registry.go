@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"sync"
 
-	"downaria-api/internal/extractors/core"
+	"fetchmoona/internal/extractors/core"
 )
 
 type ExtractorFactory func() core.Extractor

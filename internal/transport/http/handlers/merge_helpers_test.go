@@ -87,3 +87,23 @@ func TestBuildYTDLPFormatSelectorPrefersAVC1(t *testing.T) {
 		t.Fatalf("unexpected selector: %s", got)
 	}
 }
+
+func TestResolveDownloadFilenameFallbackCompatibility(t *testing.T) {
+	if got := resolveDownloadFilename("", "", "", "", "video/mp4"); got != "downaria_download.mp4" {
+		t.Fatalf("default fallback filename mismatch: %s", got)
+	}
+
+	if got := resolveDownloadFilename("", "", "", "youtube", "video/mp4"); got != "downaria_youtube_download.mp4" {
+		t.Fatalf("platform fallback filename mismatch: %s", got)
+	}
+
+	if got := resolveDownloadFilename("", "", "https://cdn.example.com/media/sample.webm", "", ""); got != "downaria_download.webm" {
+		t.Fatalf("url extension fallback mismatch: %s", got)
+	}
+}
+
+func TestResolveDownloadFilenamePreservesDownAriaBranding(t *testing.T) {
+	if got := resolveDownloadFilename("", `attachment; filename="clip_[DownAria].mp4"`, "", "", "video/mp4"); got != "clip_[DownAria].mp4" {
+		t.Fatalf("expected branded upstream filename to be preserved: %s", got)
+	}
+}

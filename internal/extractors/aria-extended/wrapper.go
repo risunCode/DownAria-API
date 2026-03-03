@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"downaria-api/internal/extractors/core"
+	"fetchmoona/internal/extractors/core"
 )
 
 type PythonExtractor struct {

@@ -3,11 +3,11 @@ package httptransport
 import (
 	"net/http"
 
-	"downaria-api/internal/core/config"
-	apperrors "downaria-api/internal/core/errors"
-	"downaria-api/internal/transport/http/handlers"
-	"downaria-api/internal/transport/http/middleware"
-	"downaria-api/pkg/response"
+	"fetchmoona/internal/core/config"
+	apperrors "fetchmoona/internal/core/errors"
+	"fetchmoona/internal/transport/http/handlers"
+	"fetchmoona/internal/transport/http/middleware"
+	"fetchmoona/pkg/response"
 	"github.com/go-chi/chi/v5"
 )
 

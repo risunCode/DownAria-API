@@ -3,7 +3,7 @@ package core
 import (
 	"strings"
 
-	mediapkg "downaria-api/pkg/media"
+	mediapkg "fetchmoona/pkg/media"
 )
 
 // MediaClassification contains normalized media detection output.

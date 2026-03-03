@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strings"
 
-	apperrors "downaria-api/internal/core/errors"
-	"downaria-api/pkg/response"
+	apperrors "fetchmoona/internal/core/errors"
+	"fetchmoona/pkg/response"
 )
 
 func BlockBotAccess() func(http.Handler) http.Handler {

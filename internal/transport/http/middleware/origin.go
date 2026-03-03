@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strings"
 
-	apperrors "downaria-api/internal/core/errors"
-	"downaria-api/pkg/response"
+	apperrors "fetchmoona/internal/core/errors"
+	"fetchmoona/pkg/response"
 )
 
 func RequireOrigin(allowedOrigins []string) func(http.Handler) http.Handler {
@@ -24,8 +24,13 @@ func RequireOrigin(allowedOrigins []string) func(http.Handler) http.Handler {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if allowAll || len(allowed) == 0 {
+			if allowAll {
 				next.ServeHTTP(w, r)
+				return
+			}
+
+			if len(allowed) == 0 {
+				response.WriteErrorRequest(w, r, apperrors.HTTPStatus(apperrors.CodeOriginNotAllowed), apperrors.CodeOriginNotAllowed, apperrors.Message(apperrors.CodeOriginNotAllowed))
 				return
 			}
 

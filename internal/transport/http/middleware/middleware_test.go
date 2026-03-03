@@ -31,6 +31,26 @@ func TestRequireOrigin(t *testing.T) {
 		}
 	})
 
+	t.Run("empty allowlist rejects all origins", func(t *testing.T) {
+		mw := RequireOrigin(nil)
+		handler := mw(nextHandler)
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Origin", "https://example.com")
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusForbidden {
+			t.Errorf("expected status %d, got %d", http.StatusForbidden, rr.Code)
+		}
+
+		body := rr.Body.String()
+		if !strings.Contains(body, "ORIGIN_NOT_ALLOWED") {
+			t.Errorf("expected error code ORIGIN_NOT_ALLOWED in body, got %s", body)
+		}
+	})
+
 	t.Run("blocked origin returns 403", func(t *testing.T) {
 		mw := RequireOrigin([]string{"https://example.com"})
 		handler := mw(nextHandler)

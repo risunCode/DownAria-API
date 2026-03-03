@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	apperrors "downaria-api/internal/core/errors"
-	"downaria-api/internal/shared/util"
-	"downaria-api/pkg/response"
+	apperrors "fetchmoona/internal/core/errors"
+	"fetchmoona/internal/shared/util"
+	"fetchmoona/pkg/response"
 )
 
 type ipBucket struct {

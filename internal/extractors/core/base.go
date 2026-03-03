@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"downaria-api/internal/infra/network"
+	"fetchmoona/internal/infra/network"
 )
 
 // BaseExtractor provides common functionality for all extractors

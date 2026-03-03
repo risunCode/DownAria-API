@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	apperrors "downaria-api/internal/core/errors"
+	apperrors "fetchmoona/internal/core/errors"
 )
 
 func TestRequireWebSignature_BodyTooLarge(t *testing.T) {
@@ -60,5 +60,17 @@ func TestRequireWebSignature_ValidSmallBody(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+}
+
+func TestRequireWebSignature_HeaderContractNames(t *testing.T) {
+	if got, want := webSigHeaderTimestamp, "X-Downaria-Timestamp"; got != want {
+		t.Fatalf("timestamp header contract changed: got %q want %q", got, want)
+	}
+	if got, want := webSigHeaderNonce, "X-Downaria-Nonce"; got != want {
+		t.Fatalf("nonce header contract changed: got %q want %q", got, want)
+	}
+	if got, want := webSigHeaderSignature, "X-Downaria-Signature"; got != want {
+		t.Fatalf("signature header contract changed: got %q want %q", got, want)
 	}
 }

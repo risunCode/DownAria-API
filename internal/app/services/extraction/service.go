@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
-	apperrors "downaria-api/internal/core/errors"
-	ariaextended "downaria-api/internal/extractors/aria-extended"
-	"downaria-api/internal/extractors/core"
-	"downaria-api/internal/extractors/registry"
-	"downaria-api/internal/shared/security"
+	apperrors "fetchmoona/internal/core/errors"
+	ariaextended "fetchmoona/internal/extractors/aria-extended"
+	"fetchmoona/internal/extractors/core"
+	"fetchmoona/internal/extractors/registry"
+	"fetchmoona/internal/shared/security"
 )
 
 var (
@@ -210,10 +210,34 @@ func shouldAdvanceAuthLane(err error) bool {
 		return false
 	}
 	categorized := apperrors.CategorizeError(err)
-	if categorized == nil {
-		return false
+	if categorized != nil {
+		if categorized.Category == apperrors.CategoryAuth {
+			return true
+		}
+		if categorized.Code == apperrors.CodeNoMediaFound {
+			return true
+		}
 	}
-	return categorized.Category == apperrors.CategoryAuth
+
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	if strings.Contains(msg, "no media") || strings.Contains(msg, "media not found") {
+		return true
+	}
+
+	authHints := []string{
+		"login required",
+		"authentication required",
+		"auth required",
+		"requires cookie",
+		"content is private",
+	}
+	for _, hint := range authHints {
+		if strings.Contains(msg, hint) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (s *extractionService) resolveServerCookie(platform string) string {

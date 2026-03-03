@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"downaria-api/internal/shared/util"
+	"fetchmoona/internal/shared/util"
 )
 
 type contextKey string

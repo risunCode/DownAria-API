@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"downaria-api/pkg/response"
+	"fetchmoona/pkg/response"
 )
 
 func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
@@ -36,7 +36,7 @@ func (h *Handler) buildStatusPayload() map[string]any {
 
 	return map[string]any{
 		"status":       "ok",
-		"message":      "DownAria-API is running",
+		"message":      "FetchMoona is running",
 		"timestamp":    now.Format(time.RFC3339),
 		"startedAt":    h.startedAt.UTC().Format(time.RFC3339),
 		"uptime":       formatUptime(uptime),

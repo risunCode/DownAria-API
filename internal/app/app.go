@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"downaria-api/internal/core/config"
-	"downaria-api/internal/shared/util"
-	httptransport "downaria-api/internal/transport/http"
-	"downaria-api/internal/transport/http/handlers"
-	"downaria-api/internal/transport/http/middleware"
+	"fetchmoona/internal/core/config"
+	"fetchmoona/internal/shared/util"
+	httptransport "fetchmoona/internal/transport/http"
+	"fetchmoona/internal/transport/http/handlers"
+	"fetchmoona/internal/transport/http/middleware"
 )
 
 type Application struct {

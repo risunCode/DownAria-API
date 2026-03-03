@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	apperrors "downaria-api/internal/core/errors"
-	"downaria-api/internal/extractors/core"
-	"downaria-api/internal/extractors/registry"
-	"downaria-api/internal/infra/cache"
+	apperrors "fetchmoona/internal/core/errors"
+	"fetchmoona/internal/extractors/core"
+	"fetchmoona/internal/extractors/registry"
+	"fetchmoona/internal/infra/cache"
 )
 
 // mockExtractor implements core.Extractor for testing
@@ -481,6 +481,49 @@ func TestExtractionService_CookieLane_GuestServerThenUserProvided(t *testing.T) 
 	}
 }
 
+func TestExtractionService_CookieLane_AdvancesOnNoMediaError(t *testing.T) {
+	reg := registry.NewRegistry()
+
+	calls := 0
+	reg.Register("lane", []*regexp.Regexp{regexp.MustCompile(`^https://lane-no-media\.com/.*$`)}, func() core.Extractor {
+		return extractorFunc(func(url string, opts core.ExtractOptions) (*core.ExtractResult, error) {
+			calls++
+			switch calls {
+			case 1:
+				if opts.Source != core.AuthSourceNone {
+					t.Fatalf("call1 expected none source, got %s", opts.Source)
+				}
+				return nil, fmt.Errorf("no media found in tweet")
+			case 2:
+				if opts.Source != core.AuthSourceServer {
+					t.Fatalf("call2 expected server source, got %s", opts.Source)
+				}
+				return nil, fmt.Errorf("no media found in tweet")
+			default:
+				if opts.Source != core.AuthSourceClient {
+					t.Fatalf("call3 expected client source, got %s", opts.Source)
+				}
+				if opts.Cookie != "sid=user" {
+					t.Fatalf("call3 expected user cookie, got %q", opts.Cookie)
+				}
+				return &core.ExtractResult{URL: url, Platform: "lane", Authentication: core.Authentication{Used: true, Source: core.AuthSourceClient}}, nil
+			}
+		})
+	})
+
+	svc := NewService(reg, 30, 1, 0, WithServerCookies(map[string]string{"lane": "sid=server"}))
+	result, err := svc.Extract(context.Background(), ExtractInput{URL: "https://lane-no-media.com/post/1", Cookie: "sid=user"})
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+	if result.Authentication.Source != core.AuthSourceClient {
+		t.Fatalf("expected user-provided lane, got %s", result.Authentication.Source)
+	}
+	if calls != 3 {
+		t.Fatalf("expected 3 calls, got %d", calls)
+	}
+}
+
 func TestExtractionService_CookieLane_NoAdvanceOnNonAuthError(t *testing.T) {
 	reg := registry.NewRegistry()
 
@@ -499,5 +542,91 @@ func TestExtractionService_CookieLane_NoAdvanceOnNonAuthError(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Fatalf("expected no lane advance for non-auth errors, got %d calls", calls)
+	}
+}
+
+func TestExtractionService_CookieLane_AdvancesOnLoginRequiredError(t *testing.T) {
+	reg := registry.NewRegistry()
+
+	calls := 0
+	reg.Register("lane", []*regexp.Regexp{regexp.MustCompile(`^https://lane-login\.com/.*$`)}, func() core.Extractor {
+		return extractorFunc(func(url string, opts core.ExtractOptions) (*core.ExtractResult, error) {
+			calls++
+			switch calls {
+			case 1:
+				if opts.Source != core.AuthSourceNone {
+					t.Fatalf("call1 expected none source, got %s", opts.Source)
+				}
+				return nil, fmt.Errorf("login required to access this content")
+			case 2:
+				if opts.Source != core.AuthSourceServer {
+					t.Fatalf("call2 expected server source, got %s", opts.Source)
+				}
+				return nil, fmt.Errorf("login required to access this content")
+			default:
+				if opts.Source != core.AuthSourceClient {
+					t.Fatalf("call3 expected client source, got %s", opts.Source)
+				}
+				if opts.Cookie != "sid=user" {
+					t.Fatalf("call3 expected user cookie, got %q", opts.Cookie)
+				}
+				return &core.ExtractResult{URL: url, Platform: "lane", Authentication: core.Authentication{Used: true, Source: core.AuthSourceClient}}, nil
+			}
+		})
+	})
+
+	svc := NewService(reg, 30, 1, 0, WithServerCookies(map[string]string{"lane": "sid=server"}))
+	result, err := svc.Extract(context.Background(), ExtractInput{URL: "https://lane-login.com/post/1", Cookie: "sid=user"})
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+	if result.Authentication.Source != core.AuthSourceClient {
+		t.Fatalf("expected user-provided lane, got %s", result.Authentication.Source)
+	}
+	if calls != 3 {
+		t.Fatalf("expected 3 calls, got %d", calls)
+	}
+}
+
+func TestExtractionService_CookieLane_AdvancesOnMediaNotFoundPrivateError(t *testing.T) {
+	reg := registry.NewRegistry()
+
+	calls := 0
+	reg.Register("lane", []*regexp.Regexp{regexp.MustCompile(`^https://lane-private\.com/.*$`)}, func() core.Extractor {
+		return extractorFunc(func(url string, opts core.ExtractOptions) (*core.ExtractResult, error) {
+			calls++
+			switch calls {
+			case 1:
+				if opts.Source != core.AuthSourceNone {
+					t.Fatalf("call1 expected none source, got %s", opts.Source)
+				}
+				return nil, fmt.Errorf("media not found or private")
+			case 2:
+				if opts.Source != core.AuthSourceServer {
+					t.Fatalf("call2 expected server source, got %s", opts.Source)
+				}
+				return nil, fmt.Errorf("media not found or private")
+			default:
+				if opts.Source != core.AuthSourceClient {
+					t.Fatalf("call3 expected client source, got %s", opts.Source)
+				}
+				if opts.Cookie != "sid=user" {
+					t.Fatalf("call3 expected user cookie, got %q", opts.Cookie)
+				}
+				return &core.ExtractResult{URL: url, Platform: "lane", Authentication: core.Authentication{Used: true, Source: core.AuthSourceClient}}, nil
+			}
+		})
+	})
+
+	svc := NewService(reg, 30, 1, 0, WithServerCookies(map[string]string{"lane": "sid=server"}))
+	result, err := svc.Extract(context.Background(), ExtractInput{URL: "https://lane-private.com/post/1", Cookie: "sid=user"})
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+	if result.Authentication.Source != core.AuthSourceClient {
+		t.Fatalf("expected user-provided lane, got %s", result.Authentication.Source)
+	}
+	if calls != 3 {
+		t.Fatalf("expected 3 calls, got %d", calls)
 	}
 }

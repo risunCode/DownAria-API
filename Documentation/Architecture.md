@@ -1,8 +1,8 @@
-# DownAria-API Architecture
+# FetchMoona Architecture
 
 ## Overview
 
-DownAria-API is a backend service for social media URL parsing and media link extraction. The architecture follows Clean Architecture principles with clearly separated layers.
+FetchMoona is a backend service for social media URL parsing and media link extraction. The architecture follows Clean Architecture principles with clearly separated layers.
 
 ## Directory Structure
 
