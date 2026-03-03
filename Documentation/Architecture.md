@@ -119,27 +119,29 @@ persistence.PublicStatsStore
 
 ### Caching Strategy
 
-- Extraction results: 60s TTL, keyed by URL plus auth hash
+- Extraction results: default 5m TTL, keyed by URL plus auth hash
 - Proxy HEAD metadata: 45s TTL, keyed by URL plus auth/UA hash
-- Implementation: TTL cache with background cleanup
+- Implementation: in-memory TTL cache with on-access expiration and bounded entry count
 
 ### Middleware Stack
 
 ```go
 // Global middleware
+- CORS
 - RequestID
-- RealIP
-- Logger
-- Recoverer
-- Timeout
+- StructuredLogging
+- RateLimit (global)
+- RouteRateLimit (stricter for POST /api/v1/merge and POST /api/web/merge)
 
 // Protected routes (web API)
 - RequireOrigin
 - BlockBotAccess
-- RateLimit
+- RequireWebSignature
+- RequireMergeEnabled (only on /api/web/merge)
 
 // Public routes (v1 API)
-- RateLimit
+- No origin/anti-bot/web-signature middleware
+- POST /api/v1/merge only when WEB_INTERNAL_SHARED_SECRET is empty
 ```
 
 ### Error Handling
@@ -199,16 +201,25 @@ apperrors.CodeRateLimited         -> 429 Too Many Requests
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PORT` | 8080 | Server port |
-| `ALLOWED_ORIGINS` | * | CORS origins |
-| `MAX_DOWNLOAD_SIZE_MB` | 500 | Maximum file size |
-| `UPSTREAM_TIMEOUT` | 30s | External request timeout |
-| `STATS_PERSIST_ENABLED` | false | Persist stats to file |
-| `STATS_PERSIST_FILE_PATH` | ./tmp/stats.json | Stats file path |
-| `STATS_PERSIST_FLUSH_INTERVAL_MS` | 5000 | Flush interval |
-| `CACHE_EXTRACTION_TTL` | 60s | Extraction result cache TTL |
-| `CACHE_PROXY_HEAD_TTL` | 45s | Proxy HEAD cache TTL |
-| `ENABLE_PROFILING` | false | Enable pprof endpoints |
+| `PORT` | `8080` | Server port |
+| `ALLOWED_ORIGINS` | _(empty)_ | CORS + `/api/web/*` origin allowlist |
+| `TRUSTED_PROXY_CIDRS` | _(empty)_ | Trusted proxy CIDRs for client IP extraction |
+| `UPSTREAM_TIMEOUT_MS` | `10000` | External request timeout (ms) |
+| `MAX_DOWNLOAD_SIZE_MB` | `1024` | Download-mode proxy limit |
+| `MAX_MERGE_OUTPUT_SIZE_MB` | `512` | Merge output stream size cap |
+| `SERVER_READ_TIMEOUT` | `15s` | HTTP server read timeout |
+| `SERVER_READ_HEADER_TIMEOUT` | `10s` | HTTP server read-header timeout |
+| `SERVER_WRITE_TIMEOUT` | `15m` | HTTP server write timeout |
+| `SERVER_IDLE_TIMEOUT` | `60s` | HTTP server idle timeout |
+| `SERVER_MAX_HEADER_BYTES` | `1048576` | Max request header bytes |
+| `GLOBAL_RATE_LIMIT_MAX_BUCKETS` | `10000` | Rate-limit bucket cap |
+| `GLOBAL_RATE_LIMIT_BUCKET_TTL` | `10m` | Rate-limit bucket TTL |
+| `STATS_PERSIST_ENABLED` | `false` | Persist stats to file |
+| `STATS_PERSIST_FILE_PATH` | `./data/public_stats.json` | Stats file path |
+| `STATS_PERSIST_FLUSH_INTERVAL_MS` | `5000` | Flush interval |
+| `STATS_PERSIST_FLUSH_THRESHOLD` | `10` | Buffered flush threshold |
+| `CACHE_EXTRACTION_TTL` | `5m` | Extraction result cache TTL |
+| `CACHE_PROXY_HEAD_TTL` | `45s` | Proxy HEAD cache TTL |
 
 ## Future Roadmap
 

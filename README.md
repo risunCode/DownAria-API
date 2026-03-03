@@ -4,8 +4,8 @@ High-performance Go-based API for extracting media from social platforms with a 
 
 ## Release
 
-- **Current unified release:** `v1.0.0`
-- **Lineage:** initial `v1.0.0` release upgraded from the Next.js/Xtfetch era and aligned with the `Complete-half/Fetchtium_RE` extraction approach.
+- **Current unified release:** `v1.1.0`
+- **Lineage:** upgraded from the initial `v1.0.0` line with security/performance hardening and unified extraction improvements.
 
 ## Features
 
@@ -17,6 +17,7 @@ High-performance Go-based API for extracting media from social platforms with a 
 - **Stats Persistence** - File-backed stats with atomic writes
 - **Secure Web Gateway** - Internal signed `/api/web/*` routes via `WEB_INTERNAL_SHARED_SECRET`
 - **Large File Stability** - Improved merge/proxy behavior for large responses and long-running transfers
+- **Multi-mode Merge** - Supports YouTube URL fast-path, direct `videoUrl+audioUrl` merges, and audio-only conversion
 
 ## Code Quality & Reliability Improvements
 
@@ -42,6 +43,18 @@ go build -o downaria-api ./cmd/server
 ```
 
 ## API Endpoints
+
+Active routes are registered in `internal/transport/http/router.go`.
+
+- Public utility: `GET /`, `GET /health`, `GET /api/settings`, `GET /api/v1/stats/public`
+- Web-protected: `POST /api/web/extract`, `GET /api/web/proxy`, `GET /api/web/download`, `POST /api/web/merge` (merge route also gated by `MERGE_ENABLED`)
+- Public API: `POST /api/v1/extract`, `GET /api/v1/proxy`, `GET /api/v1/download`
+- Conditional public merge: `POST /api/v1/merge` is only registered when `WEB_INTERNAL_SHARED_SECRET` is empty
+
+Production posture:
+
+- `cmd/server/main.go` requires `WEB_INTERNAL_SHARED_SECRET` and exits when it is missing
+- Because of that, signed `/api/web/merge` is the primary production merge route
 
 ### POST /api/v1/extract
 
@@ -192,9 +205,19 @@ Set required variables in Railway:
 |----------|---------|-------------|
 | `PORT` | `8080` | Server port |
 | `ALLOWED_ORIGINS` | _(empty)_ | Comma-separated allowed origins |
+| `TRUSTED_PROXY_CIDRS` | _(empty)_ | Comma-separated trusted proxy CIDRs/IPs used for client IP extraction |
 | `UPSTREAM_TIMEOUT_MS` | `10000` | Upstream timeout in milliseconds |
 | `GLOBAL_RATE_LIMIT_WINDOW` | `60/1m` | Global IP rate limit in `<limit>/<window>` format (supports `5m`, `5min`, `1h`) |
+| `GLOBAL_RATE_LIMIT_MAX_BUCKETS` | `10000` | Max in-memory rate-limit buckets |
+| `GLOBAL_RATE_LIMIT_BUCKET_TTL` | `10m` | TTL for idle rate-limit buckets |
 | `MAX_DOWNLOAD_SIZE_MB` | `1024` | Max proxied file size in MB |
+| `MAX_MERGE_OUTPUT_SIZE_MB` | `512` | Max merge/audio-conversion output size in MB |
+| `SERVER_READ_TIMEOUT` | `15s` | HTTP server read timeout |
+| `SERVER_READ_HEADER_TIMEOUT` | `10s` | HTTP server read-header timeout |
+| `SERVER_WRITE_TIMEOUT` | `15m` | HTTP server write timeout |
+| `SERVER_IDLE_TIMEOUT` | `60s` | HTTP server idle timeout |
+| `SERVER_MAX_HEADER_BYTES` | `1048576` | HTTP max request header size |
+| `WEB_INTERNAL_SHARED_SECRET` | _(required at runtime)_ | Required for server startup and `/api/web/*` request signature verification |
 | `STATS_PERSIST_ENABLED` | `false` | Enable file-backed stats persistence |
 | `STATS_PERSIST_FILE_PATH` | `./data/public_stats.json` | Stats file path |
 | `STATS_PERSIST_FLUSH_INTERVAL_MS` | `5000` | Flush interval in ms |
@@ -228,4 +251,4 @@ go test ./internal/app/services/extraction/...
 
 ## License
 
-MIT
+GPL-3

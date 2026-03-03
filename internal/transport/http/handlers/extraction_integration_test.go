@@ -4,6 +4,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,7 +23,14 @@ import (
 	"downaria-api/internal/extractors/registry"
 	"downaria-api/internal/infra/cache"
 	"downaria-api/internal/infra/network"
+	"downaria-api/internal/shared/security"
 )
+
+type integrationResolver struct{}
+
+func (integrationResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
+	return []net.IPAddr{{IP: net.ParseIP("93.184.216.34")}}, nil
+}
 
 type integrationStatsStore struct{}
 
@@ -87,6 +95,7 @@ func newIntegrationHandler(t *testing.T, extractorSvc extraction.Service) *Handl
 		Streamer:   network.NewStreamer(),
 		extractor:  extractorSvc,
 		headCache:  cache.NewTTLCache(),
+		urlGuard:   security.NewOutboundURLValidator(integrationResolver{}),
 	}
 }
 

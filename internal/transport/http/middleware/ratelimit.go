@@ -28,6 +28,12 @@ type RateLimiter struct {
 	clientIPLookup func(*http.Request) string
 }
 
+type RouteLimitRule struct {
+	Method  string
+	Path    string
+	Limiter *RateLimiter
+}
+
 func NewRateLimiter(limit int, window time.Duration) *RateLimiter {
 	if limit < 1 {
 		limit = 60
@@ -159,44 +165,87 @@ func (rl *RateLimiter) ensureCapacityLocked(now time.Time, incomingIP string) {
 func RateLimit(limiter *RateLimiter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ip := limiter.clientIP(r)
-			if ip == "" {
-				ip = "unknown"
-			}
-			allowed, remaining, resetAt := limiter.Allow(ip)
-
-			w.Header().Set("X-RateLimit-Limit", intToString(limiter.limit))
-			w.Header().Set("X-RateLimit-Remaining", intToString(remaining))
-			w.Header().Set("X-RateLimit-Reset", int64ToString(resetAt))
-
-			if !allowed {
-				retryAfter := int(resetAt - time.Now().UTC().Unix())
-				if retryAfter < 1 {
-					retryAfter = 1
-				}
-
-				w.Header().Set("Retry-After", intToString(retryAfter))
-				response.WriteErrorRequestWithDetails(
-					w,
-					r,
-					apperrors.HTTPStatus(apperrors.CodeRateLimited),
-					apperrors.CodeRateLimited,
-					apperrors.Message(apperrors.CodeRateLimited),
-					string(apperrors.CategoryRateLimit),
-					map[string]any{
-						"retryAfter": retryAfter,
-						"resetAt":    resetAt,
-						"limit":      limiter.limit,
-						"window":     formatRateWindow(limiter.window),
-						"status":     http.StatusTooManyRequests,
-					},
-				)
+			if !applyRateLimit(w, r, limiter) {
 				return
 			}
-
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+func RouteRateLimit(rules []RouteLimitRule) func(http.Handler) http.Handler {
+	active := make([]RouteLimitRule, 0, len(rules))
+	for _, rule := range rules {
+		if rule.Limiter == nil {
+			continue
+		}
+		rule.Method = strings.ToUpper(strings.TrimSpace(rule.Method))
+		rule.Path = strings.TrimSpace(rule.Path)
+		if rule.Method == "" || rule.Path == "" {
+			continue
+		}
+		active = append(active, rule)
+	}
+
+	return func(next http.Handler) http.Handler {
+		if len(active) == 0 {
+			return next
+		}
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			for _, rule := range active {
+				if r.Method == rule.Method && r.URL.Path == rule.Path {
+					if !applyRateLimit(w, r, rule.Limiter) {
+						return
+					}
+					break
+				}
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func applyRateLimit(w http.ResponseWriter, r *http.Request, limiter *RateLimiter) bool {
+	if limiter == nil {
+		return true
+	}
+
+	ip := limiter.clientIP(r)
+	if ip == "" {
+		ip = "unknown"
+	}
+	allowed, remaining, resetAt := limiter.Allow(ip)
+
+	w.Header().Set("X-RateLimit-Limit", intToString(limiter.limit))
+	w.Header().Set("X-RateLimit-Remaining", intToString(remaining))
+	w.Header().Set("X-RateLimit-Reset", int64ToString(resetAt))
+
+	if allowed {
+		return true
+	}
+
+	retryAfter := int(resetAt - time.Now().UTC().Unix())
+	if retryAfter < 1 {
+		retryAfter = 1
+	}
+
+	w.Header().Set("Retry-After", intToString(retryAfter))
+	response.WriteErrorRequestWithDetails(
+		w,
+		r,
+		apperrors.HTTPStatus(apperrors.CodeRateLimited),
+		apperrors.CodeRateLimited,
+		apperrors.Message(apperrors.CodeRateLimited),
+		string(apperrors.CategoryRateLimit),
+		map[string]any{
+			"retryAfter": retryAfter,
+			"resetAt":    resetAt,
+			"limit":      limiter.limit,
+			"window":     formatRateWindow(limiter.window),
+			"status":     http.StatusTooManyRequests,
+		},
+	)
+	return false
 }
 
 func intToString(value int) string {

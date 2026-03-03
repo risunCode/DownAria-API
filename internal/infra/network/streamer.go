@@ -26,8 +26,15 @@ type Streamer struct {
 }
 
 func NewStreamer() *Streamer {
+	return NewStreamerWithClient(GetDefaultClient())
+}
+
+func NewStreamerWithClient(client *http.Client) *Streamer {
+	if client == nil {
+		client = GetDefaultClient()
+	}
 	return &Streamer{
-		client: GetDefaultClient(),
+		client: client,
 	}
 }
 

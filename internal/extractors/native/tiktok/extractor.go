@@ -118,7 +118,7 @@ func (e *TikTokExtractor) Extract(urlStr string, opts core.ExtractOptions) (*cor
 
 	media := core.NewMedia(0, core.MediaTypeVideo, result.Data.OriginCover)
 	variant := core.NewVideoVariant("HD", videoURL)
-	filename := core.GenerateFilename(result.Data.Author.Nickname, result.Data.Title, result.Data.ID, "mp4")
+	filename := core.GenerateFilenameWithMeta(result.Data.Author.Nickname, result.Data.Title, result.Data.Author.UniqueId, result.Data.ID, "mp4")
 	variant = variant.WithFilename(filename)
 	core.AddVariant(&media, variant)
 

@@ -6,12 +6,15 @@ import (
 	"log"
 	"math"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
 	apperrors "downaria-api/internal/core/errors"
+	ariaextended "downaria-api/internal/extractors/aria-extended"
 	"downaria-api/internal/extractors/core"
 	"downaria-api/internal/extractors/registry"
+	"downaria-api/internal/shared/security"
 )
 
 var (
@@ -30,6 +33,7 @@ type Service interface {
 
 type extractionService struct {
 	registry       *registry.Registry
+	fallback       func() core.Extractor
 	timeoutSeconds int
 	maxRetries     int
 	retryDelayMs   int
@@ -61,6 +65,15 @@ func WithServerCookies(cookies map[string]string) ServiceOption {
 	}
 }
 
+func WithFallbackExtractorFactory(factory func() core.Extractor) ServiceOption {
+	return func(s *extractionService) {
+		if factory == nil {
+			return
+		}
+		s.fallback = factory
+	}
+}
+
 func NewService(reg *registry.Registry, timeoutSeconds int, maxRetries int, retryDelayMs int, options ...ServiceOption) Service {
 	if maxRetries < 1 {
 		maxRetries = 1
@@ -70,6 +83,7 @@ func NewService(reg *registry.Registry, timeoutSeconds int, maxRetries int, retr
 	}
 	svc := &extractionService{
 		registry:       reg,
+		fallback:       func() core.Extractor { return ariaextended.NewPythonExtractor("") },
 		timeoutSeconds: timeoutSeconds,
 		maxRetries:     maxRetries,
 		retryDelayMs:   retryDelayMs,
@@ -91,8 +105,20 @@ func (s *extractionService) Extract(ctx context.Context, input ExtractInput) (*c
 	}
 
 	extractor, platform, err := s.registry.GetExtractor(targetURL)
+	allowServerCookie := true
 	if err != nil {
-		return nil, typedError{kind: ErrUnsupportedPlatform, err: err}
+		if isNativePlatformURL(targetURL) {
+			return nil, typedError{kind: ErrUnsupportedPlatform, err: err}
+		}
+		if s.fallback == nil {
+			return nil, typedError{kind: ErrUnsupportedPlatform, err: err}
+		}
+		extractor = s.fallback()
+		if extractor == nil {
+			return nil, typedError{kind: ErrUnsupportedPlatform, err: err}
+		}
+		platform = ""
+		allowServerCookie = false
 	}
 
 	userCookie := strings.TrimSpace(input.Cookie)
@@ -104,11 +130,13 @@ func (s *extractionService) Extract(ctx context.Context, input ExtractInput) (*c
 	}
 
 	lanes := []core.ExtractOptions{baseOpts}
-	if serverCookie := s.resolveServerCookie(platform); serverCookie != "" {
-		lane := baseOpts
-		lane.Cookie = serverCookie
-		lane.Source = core.AuthSourceServer
-		lanes = append(lanes, lane)
+	if allowServerCookie {
+		if serverCookie := s.resolveServerCookie(platform); serverCookie != "" {
+			lane := baseOpts
+			lane.Cookie = serverCookie
+			lane.Source = core.AuthSourceServer
+			lanes = append(lanes, lane)
+		}
 	}
 	if userCookie != "" {
 		lane := baseOpts
@@ -122,7 +150,11 @@ func (s *extractionService) Extract(ctx context.Context, input ExtractInput) (*c
 		result, err := s.extractWithRetry(ctx, extractor, targetURL, lane, platform)
 		if err == nil {
 			if result != nil && result.Platform == "" {
-				result.Platform = platform
+				if platform != "" {
+					result.Platform = platform
+				} else {
+					result.Platform = fallbackPlatformFromURL(targetURL)
+				}
 			}
 			return result, nil
 		}
@@ -160,7 +192,7 @@ func (s *extractionService) extractWithRetry(ctx context.Context, extractor core
 		}
 
 		delay := time.Duration(math.Min(float64(s.retryDelayMs)*math.Pow(2, float64(attempt-1)), 30000)) * time.Millisecond
-		log.Printf("[extraction] retry attempt=%d platform=%s source=%s delay=%s err=%v", attempt, platform, opts.Source, delay, err)
+		log.Printf("[extraction] retry attempt=%d platform=%s source=%s delay=%s err=%s", attempt, platform, opts.Source, delay, security.RedactLogError(err))
 
 		select {
 		case <-time.After(delay):
@@ -195,18 +227,46 @@ func (s *extractionService) callExtractor(extractor core.Extractor, targetURL st
 	return extractor.Extract(targetURL, opts)
 }
 
-func validateHTTPURL(raw string) (string, error) {
-	parsed, err := url.Parse(strings.TrimSpace(raw))
+func fallbackPlatformFromURL(targetURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(targetURL))
 	if err != nil {
-		return "", err
+		return "generic"
 	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return "", errors.New("unsupported scheme")
+	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+	if host == "" {
+		return "generic"
 	}
-	if parsed.Host == "" {
-		return "", errors.New("missing host")
+	host = strings.TrimPrefix(host, "www.")
+	parts := strings.Split(host, ".")
+	if len(parts) >= 2 {
+		return parts[len(parts)-2]
 	}
-	return parsed.String(), nil
+	return host
+}
+
+func isNativePlatformURL(targetURL string) bool {
+	nativePatterns := [][]*regexp.Regexp{
+		registry.FacebookPatterns,
+		registry.InstagramPatterns,
+		registry.ThreadsPatterns,
+		registry.TwitterPatterns,
+		registry.TikTokPatterns,
+		registry.PixivPatterns,
+	}
+
+	for _, patterns := range nativePatterns {
+		for _, pattern := range patterns {
+			if pattern.MatchString(targetURL) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func validateHTTPURL(raw string) (string, error) {
+	return security.SanitizeHTTPURLString(raw)
 }
 
 type typedError struct {

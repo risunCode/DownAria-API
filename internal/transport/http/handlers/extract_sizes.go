@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"io"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -81,6 +80,7 @@ func (h *Handler) enrichVariantSizes(ctx context.Context, result *extractcore.Ex
 		}
 		for _, ref := range refs {
 			result.Media[ref.mediaIndex].Variants[ref.variantIndex].Size = size
+			result.Media[ref.mediaIndex].Variants[ref.variantIndex].Filesize = size
 		}
 	}
 }
@@ -91,23 +91,33 @@ func shouldEnrichPlatform(platform string) bool {
 		return true
 	case "threads":
 		return true
+	case "youtube", "generic":
+		return true
 	default:
 		return false
 	}
 }
 
 func (h *Handler) resolveRemoteContentLength(ctx context.Context, targetURL, requestID string) int64 {
+	validatedURL, err := h.sanitizeAndValidateOutboundURL(ctx, targetURL)
+	if err != nil {
+		return 0
+	}
+	targetURL = validatedURL
+
 	cacheKey := buildProxyHeadCacheKey(targetURL, "", "")
-	if cached, ok := h.headCache.Get(cacheKey); ok {
-		if meta, castOK := cached.(proxyHeadMetadata); castOK {
-			if size := parseContentLength(meta.ContentLength); size > 0 {
-				return size
+	if h.headCache != nil {
+		if cached, ok := h.headCache.Get(cacheKey); ok {
+			if meta, castOK := cached.(proxyHeadMetadata); castOK {
+				if size := parseContentLength(meta.ContentLength); size > 0 {
+					return size
+				}
 			}
 		}
 	}
 
 	headers := buildProxyHeaders(targetURL, "", "", requestID)
-	meta := h.fetchHeadMetadata(ctx, targetURL, headers)
+	meta, _ := h.getProxyHeadMetadata(ctx, cacheKey, targetURL, headers)
 	if size := parseContentLength(meta.ContentLength); size > 0 {
 		h.setHeadMetadataCache(cacheKey, meta)
 		return size
@@ -147,14 +157,16 @@ func (h *Handler) setHeadMetadataCache(cacheKey string, meta proxyHeadMetadata) 
 	if ttl <= 0 {
 		ttl = proxyHeadCacheTTL
 	}
-	h.headCache.Set(cacheKey, meta, ttl)
+	if h.headCache != nil {
+		h.headCache.Set(cacheKey, meta, ttl)
+	}
 }
 
 func (h *Handler) probeStreamContentLength(ctx context.Context, targetURL string, headers map[string]string) int64 {
 	streamResult, err := h.Streamer.Stream(ctx, network.StreamOptions{
 		URL:         targetURL,
 		Headers:     headers,
-		RangeHeader: "",
+		RangeHeader: "bytes=0-65535",
 	})
 	if err != nil || streamResult == nil || streamResult.Body == nil {
 		return 0
@@ -165,19 +177,13 @@ func (h *Handler) probeStreamContentLength(ctx context.Context, targetURL string
 		return size
 	}
 
-	maxBytes := int64(h.config.MaxDownloadSizeMB) * 1024 * 1024
-	if maxBytes <= 0 {
-		maxBytes = 1024 * 1024 * 1024
+	if contentRange := strings.TrimSpace(streamResult.Headers["Content-Range"]); contentRange != "" {
+		if total := parseContentRangeTotal(contentRange); total > 0 {
+			return total
+		}
 	}
 
-	count, err := io.Copy(io.Discard, io.LimitReader(streamResult.Body, maxBytes+1))
-	if err != nil {
-		return 0
-	}
-	if count > maxBytes {
-		return 0
-	}
-	return count
+	return 0
 }
 
 func (h *Handler) fetchHeadMetadata(ctx context.Context, targetURL string, headers map[string]string) proxyHeadMetadata {

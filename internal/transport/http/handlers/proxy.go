@@ -1,25 +1,31 @@
 package handlers
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
 	apperrors "downaria-api/internal/core/errors"
 	"downaria-api/internal/infra/network"
-	"downaria-api/internal/shared/security"
 	"downaria-api/internal/shared/util"
 	"downaria-api/internal/transport/http/middleware"
 	"downaria-api/pkg/response"
 )
 
 const proxyHeadCacheTTL = 45 * time.Second
+
+const (
+	maxProxyPreviewSizeMB = 10 * 1024 // 10 GB
+	defaultDownloadSizeMB = 1024      // 1 GB
+)
 
 type proxyHeadMetadata struct {
 	StatusCode    int
@@ -28,6 +34,14 @@ type proxyHeadMetadata struct {
 }
 
 func (h *Handler) Proxy(w http.ResponseWriter, r *http.Request) {
+	h.proxyWithMode(w, r, false)
+}
+
+func (h *Handler) Download(w http.ResponseWriter, r *http.Request) {
+	h.proxyWithMode(w, r, true)
+}
+
+func (h *Handler) proxyWithMode(w http.ResponseWriter, r *http.Request, forceDownload bool) {
 	builder := response.NewBuilderFromRequest(r).WithAccessMode("public").WithPublicContent(true)
 
 	target := r.URL.Query().Get("url")
@@ -37,17 +51,13 @@ func (h *Handler) Proxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	requestID := middleware.RequestIDFromContext(r.Context())
-	guard := h.urlGuard
-	if guard == nil {
-		guard = security.NewOutboundURLValidator(nil)
-	}
-	validatedTarget, err := guard.Validate(r.Context(), target)
+	validatedTarget, err := h.sanitizeAndValidateOutboundURL(r.Context(), target)
 	if err != nil {
-		log.Printf("request_id=%s component=proxy event=url_validation_failed err=%v", requestID, err)
+		log.Printf("request_id=%s component=proxy event=url_validation_failed err=%s", requestID, redactLogError(err))
 		_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeInvalidURL), apperrors.CodeInvalidURL, "url is required and must point to a public http/https destination")
 		return
 	}
-	target = validatedTarget.String()
+	target = validatedTarget
 
 	upstreamAuth := resolveUpstreamAuthorization(r)
 	userAgentOverride := strings.TrimSpace(r.Header.Get("X-Upstream-User-Agent"))
@@ -55,47 +65,20 @@ func (h *Handler) Proxy(w http.ResponseWriter, r *http.Request) {
 	headers := buildProxyHeaders(target, userAgentOverride, upstreamAuth, requestID)
 	rangeHeader := r.Header.Get("Range")
 	headOnly := r.URL.Query().Get("head") == "1"
-	isDownload := r.URL.Query().Get("download") == "1"
+	isDownload := forceDownload || r.URL.Query().Get("download") == "1"
 
 	if headOnly {
 		cacheKey := buildProxyHeadCacheKey(target, upstreamAuth, userAgentOverride)
-		if cached, ok := h.headCache.Get(cacheKey); ok {
-			if meta, castOK := cached.(proxyHeadMetadata); castOK {
-				writeProxyHeadResponse(w, meta)
-				return
-			}
-		}
-
-		req, err := http.NewRequestWithContext(r.Context(), http.MethodHead, target, nil)
+		meta, err := h.getProxyHeadMetadata(r.Context(), cacheKey, target, headers)
 		if err != nil {
-			log.Printf("request_id=%s component=proxy event=create_head_request_failed err=%v", requestID, err)
-			_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeProxyFailed), apperrors.CodeProxyFailed, apperrors.Message(apperrors.CodeProxyFailed))
-			return
-		}
-
-		for k, v := range headers {
-			req.Header.Set(k, v)
-		}
-
-		resp, err := h.httpClient.Do(req)
-		if err != nil {
-			log.Printf("request_id=%s component=proxy event=head_request_failed err=%v", requestID, err)
+			log.Printf("request_id=%s component=proxy event=head_request_failed err=%s", requestID, redactLogError(err))
 			_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeProxyFailed), apperrors.CodeProxyFailed, "failed to fetch upstream headers")
 			return
 		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode >= http.StatusBadRequest {
-			_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeProxyFailed), apperrors.CodeProxyFailed, fmt.Sprintf("upstream returned status %d", resp.StatusCode))
+		if meta.StatusCode >= http.StatusBadRequest {
+			_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeProxyFailed), apperrors.CodeProxyFailed, fmt.Sprintf("upstream returned status %d", meta.StatusCode))
 			return
 		}
-
-		meta := proxyHeadMetadata{
-			StatusCode:    resp.StatusCode,
-			ContentType:   strings.TrimSpace(resp.Header.Get("Content-Type")),
-			ContentLength: strings.TrimSpace(resp.Header.Get("Content-Length")),
-		}
-		h.headCache.Set(cacheKey, meta, proxyHeadCacheTTL)
 		writeProxyHeadResponse(w, meta)
 		return
 	}
@@ -107,7 +90,7 @@ func (h *Handler) Proxy(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if err != nil {
-		log.Printf("request_id=%s component=proxy event=stream_failed err=%v", requestID, err)
+		log.Printf("request_id=%s component=proxy event=stream_failed err=%s", requestID, redactLogError(err))
 		_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeProxyFailed), apperrors.CodeProxyFailed, "failed to stream upstream media")
 		return
 	}
@@ -115,10 +98,11 @@ func (h *Handler) Proxy(w http.ResponseWriter, r *http.Request) {
 
 	if cl := result.Headers["Content-Length"]; cl != "" {
 		if size, err := strconv.ParseInt(cl, 10, 64); err == nil {
-			maxBytes := int64(h.config.MaxDownloadSizeMB) * 1024 * 1024
+			maxBytes := h.proxySizeLimitBytes(isDownload)
 			if size > maxBytes {
+				limitMB := h.proxySizeLimitMB(isDownload)
 				_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeFileTooLarge), apperrors.CodeFileTooLarge,
-					fmt.Sprintf("file size %d MB exceeds maximum %d MB", size/(1024*1024), h.config.MaxDownloadSizeMB))
+					fmt.Sprintf("file size %d MB exceeds maximum %d MB", size/(1024*1024), limitMB))
 				return
 			}
 		}
@@ -155,12 +139,86 @@ func (h *Handler) Proxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(result.StatusCode)
-	maxBytes := int64(h.config.MaxDownloadSizeMB) * 1024 * 1024
+	maxBytes := h.proxySizeLimitBytes(isDownload)
 	_, _ = io.Copy(w, io.LimitReader(result.Body, maxBytes))
 
 	if isDownload && result.StatusCode >= http.StatusOK && result.StatusCode < http.StatusBadRequest {
 		h.statsStore.RecordDownload(time.Now().UTC())
 	}
+}
+
+func (h *Handler) proxySizeLimitMB(isDownload bool) int {
+	if !isDownload {
+		return maxProxyPreviewSizeMB
+	}
+	if h.config.MaxDownloadSizeMB > 0 {
+		return h.config.MaxDownloadSizeMB
+	}
+	return defaultDownloadSizeMB
+}
+
+func (h *Handler) proxySizeLimitBytes(isDownload bool) int64 {
+	return int64(h.proxySizeLimitMB(isDownload)) * 1024 * 1024
+}
+
+func (h *Handler) getProxyHeadMetadata(ctx context.Context, cacheKey, targetURL string, headers map[string]string) (proxyHeadMetadata, error) {
+	if h.headCache != nil {
+		if cached, ok := h.headCache.Get(cacheKey); ok {
+			if meta, castOK := cached.(proxyHeadMetadata); castOK {
+				return meta, nil
+			}
+		}
+	}
+
+	v, err, _ := h.headGroup.Do(cacheKey, func() (any, error) {
+		if h.headCache != nil {
+			if cached, ok := h.headCache.Get(cacheKey); ok {
+				if meta, castOK := cached.(proxyHeadMetadata); castOK {
+					return meta, nil
+				}
+			}
+		}
+
+		meta, fetchErr := h.fetchProxyHeadMetadata(ctx, targetURL, headers)
+		if fetchErr != nil {
+			return proxyHeadMetadata{}, fetchErr
+		}
+		if h.headCache != nil {
+			ttl := h.config.CacheProxyHeadTTL
+			if ttl <= 0 {
+				ttl = proxyHeadCacheTTL
+			}
+			h.headCache.Set(cacheKey, meta, ttl)
+		}
+		return meta, nil
+	})
+	if err != nil {
+		return proxyHeadMetadata{}, err
+	}
+	meta, _ := v.(proxyHeadMetadata)
+	return meta, nil
+}
+
+func (h *Handler) fetchProxyHeadMetadata(ctx context.Context, targetURL string, headers map[string]string) (proxyHeadMetadata, error) {
+	meta := proxyHeadMetadata{}
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, targetURL, nil)
+	if err != nil {
+		return meta, err
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := h.httpClient.Do(req)
+	if err != nil {
+		return meta, err
+	}
+	defer resp.Body.Close()
+
+	meta.StatusCode = resp.StatusCode
+	meta.ContentType = strings.TrimSpace(resp.Header.Get("Content-Type"))
+	meta.ContentLength = strings.TrimSpace(resp.Header.Get("Content-Length"))
+	return meta, nil
 }
 
 // buildProxyHeaders builds platform-specific headers for proxy requests
@@ -180,26 +238,30 @@ func buildProxyHeaders(targetURL, userAgent, authorization, requestID string) ma
 		headers["X-Request-ID"] = reqID
 	}
 
-	lowerURL := strings.ToLower(targetURL)
-	switch {
-	case strings.Contains(lowerURL, "instagram.com") || strings.Contains(lowerURL, "cdninstagram.com") || strings.Contains(lowerURL, "instagram.") || strings.Contains(lowerURL, "threads.com") || strings.Contains(lowerURL, "threads.net"):
-		headers["Referer"] = "https://www.instagram.com/"
-	case strings.Contains(lowerURL, "facebook.com") || strings.Contains(lowerURL, "fbcdn.net"):
-		headers["Referer"] = "https://www.facebook.com/"
-	case strings.Contains(lowerURL, "googlevideo.com") || strings.Contains(lowerURL, "youtube.com"):
-		headers["Referer"] = "https://www.youtube.com/"
-		headers["Origin"] = "https://www.youtube.com"
-	case strings.Contains(lowerURL, "pixiv.net") || strings.Contains(lowerURL, "pximg.net"):
-		headers["Referer"] = "https://www.pixiv.net/"
-	case strings.Contains(lowerURL, "twitter.com") || strings.Contains(lowerURL, "x.com") || strings.Contains(lowerURL, "twimg.com"):
-		headers["Referer"] = "https://x.com/"
-		headers["Origin"] = "https://x.com"
-	case strings.Contains(lowerURL, "tiktok.com") || strings.Contains(lowerURL, "tiktokcdn.com") || strings.Contains(lowerURL, "byteoversea.com"):
-		headers["Referer"] = "https://www.tiktok.com/"
-		headers["Origin"] = "https://www.tiktok.com"
+	if referer, origin := deriveUpstreamOriginAndReferer(targetURL); referer != "" {
+		headers["Referer"] = referer
+		if origin != "" {
+			headers["Origin"] = origin
+		}
 	}
 
 	return headers
+}
+
+func deriveUpstreamOriginAndReferer(targetURL string) (referer string, origin string) {
+	parsed, err := url.Parse(strings.TrimSpace(targetURL))
+	if err != nil {
+		return "", ""
+	}
+
+	scheme := strings.ToLower(parsed.Scheme)
+	host := strings.TrimSpace(parsed.Host)
+	if host == "" || (scheme != "http" && scheme != "https") {
+		return "", ""
+	}
+
+	origin = scheme + "://" + host
+	return origin + "/", origin
 }
 
 func writeProxyHeadResponse(w http.ResponseWriter, meta proxyHeadMetadata) {

@@ -42,6 +42,20 @@ func (h *Handler) Extract(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	validatedURL, err := h.sanitizeAndValidateOutboundURL(r.Context(), req.URL)
+	if err != nil {
+		_ = builder.WriteErrorWithDetails(
+			w,
+			apperrors.HTTPStatus(apperrors.CodeInvalidURL),
+			apperrors.CodeInvalidURL,
+			apperrors.Message(apperrors.CodeInvalidURL),
+			string(apperrors.CategoryValidation),
+			nil,
+		)
+		return
+	}
+	req.URL = validatedURL
+
 	result, err := h.extractor.Extract(r.Context(), extraction.ExtractInput{
 		URL:    req.URL,
 		Cookie: req.Cookie,

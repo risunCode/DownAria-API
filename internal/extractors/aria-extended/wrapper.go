@@ -4,6 +4,10 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"net/url"
+	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,7 +27,11 @@ func (e *PythonExtractor) Match(url string) bool {
 }
 
 func (e *PythonExtractor) Extract(urlStr string, opts core.ExtractOptions) (*core.ExtractResult, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	baseCtx := opts.Ctx
+	if baseCtx == nil {
+		baseCtx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(baseCtx, 30*time.Second)
 	defer cancel()
 
 	extraArgs := make([]string, 0, 6)
@@ -42,19 +50,21 @@ func (e *PythonExtractor) Extract(urlStr string, opts core.ExtractOptions) (*cor
 		return nil, err
 	}
 
-	itemType := core.MediaTypeVideo
-	hasVideo := false
-	for _, format := range meta.Formats {
-		if format.VCodec != "" && format.VCodec != "none" {
-			hasVideo = true
-			break
-		}
-	}
-	if !hasVideo {
-		itemType = core.MediaTypeAudio
+	return e.buildResultFromMeta(urlStr, meta, opts), nil
+}
+
+func (e *PythonExtractor) buildResultFromMeta(urlStr string, meta *core.YTDLPDumpJSON, opts core.ExtractOptions) *core.ExtractResult {
+	if meta == nil {
+		meta = &core.YTDLPDumpJSON{}
 	}
 
 	qualityForFormat := func(f core.YTDLPFormat) string {
+		if quality := strings.TrimSpace(f.Quality); quality != "" {
+			if _, err := strconv.Atoi(quality); err == nil {
+				return quality + "p"
+			}
+			return quality
+		}
 		if note := strings.TrimSpace(f.FormatNote); note != "" {
 			return note
 		}
@@ -89,13 +99,84 @@ func (e *PythonExtractor) Extract(urlStr string, opts core.ExtractOptions) (*cor
 		return ""
 	}
 
-	sources := make([]core.YTDLPFormat, 0, len(meta.Formats))
+	// Deduplicate YouTube formats by resolution height
+	// Keep only the highest bitrate format for each resolution
+	videoByResolution := make(map[int]core.YTDLPFormat)
+	fallbackVideoFormats := make(map[string]core.YTDLPFormat)
+	var audioFormats []core.YTDLPFormat
+
 	for _, f := range meta.Formats {
 		if f.URL == "" || (f.VCodec == "none" && f.ACodec == "none") {
 			continue
 		}
-		sources = append(sources, f)
+
+		// Track audio-only formats separately
+		if f.VCodec == "none" && f.ACodec != "none" {
+			audioFormats = append(audioFormats, f)
+			continue
+		}
+
+		// For video formats with known height, deduplicate by resolution height.
+		if f.Height > 0 {
+			existing, exists := videoByResolution[f.Height]
+			if !exists {
+				videoByResolution[f.Height] = f
+				continue
+			}
+
+			existingHasKnownSize := existing.Filesize > 0 || existing.FilesizeApprox > 0
+			newHasKnownSize := f.Filesize > 0 || f.FilesizeApprox > 0
+
+			if !existingHasKnownSize && newHasKnownSize {
+				videoByResolution[f.Height] = f
+				continue
+			}
+
+			if existingHasKnownSize == newHasKnownSize && f.TBR > existing.TBR {
+				videoByResolution[f.Height] = f
+			}
+			continue
+		}
+
+		// Some generic extractors expose quality but no height (e.g., 360/480/720/1080).
+		// Keep one variant per logical quality key instead of dropping them.
+		fallbackKey := strings.TrimSpace(f.Quality)
+		if fallbackKey == "" {
+			fallbackKey = strings.TrimSpace(f.FormatID)
+		}
+		if fallbackKey == "" {
+			fallbackKey = strings.TrimSpace(f.URL)
+		}
+		existing, exists := fallbackVideoFormats[fallbackKey]
+		if !exists || rankVideoFormat(f) > rankVideoFormat(existing) {
+			fallbackVideoFormats[fallbackKey] = f
+		}
 	}
+
+	// Rebuild sources: unique video formats + all audio formats
+	videoFormats := make([]core.YTDLPFormat, 0, len(videoByResolution)+len(fallbackVideoFormats))
+	for _, f := range videoByResolution {
+		videoFormats = append(videoFormats, f)
+	}
+	for _, f := range fallbackVideoFormats {
+		videoFormats = append(videoFormats, f)
+	}
+
+	// Highest quality first for generic/plugin outputs.
+	sort.Slice(videoFormats, func(i, j int) bool {
+		return rankVideoFormat(videoFormats[i]) > rankVideoFormat(videoFormats[j])
+	})
+
+	sort.Slice(audioFormats, func(i, j int) bool {
+		if audioFormats[i].ABR != audioFormats[j].ABR {
+			return audioFormats[i].ABR > audioFormats[j].ABR
+		}
+		return audioFormats[i].TBR > audioFormats[j].TBR
+	})
+
+	sources := make([]core.YTDLPFormat, 0, len(videoFormats)+len(audioFormats))
+	sources = append(sources, videoFormats...)
+	sources = append(sources, audioFormats...)
 
 	if len(sources) == 0 && meta.URL != "" {
 		sources = append(sources, core.YTDLPFormat{
@@ -105,28 +186,27 @@ func (e *PythonExtractor) Extract(urlStr string, opts core.ExtractOptions) (*cor
 		})
 	}
 
-	mediaType := core.MediaTypeVideo
-	if !hasVideo {
-		mediaType = core.MediaTypeAudio
-	}
-
 	builder := core.NewResponseBuilder(urlStr).
-		WithPlatform(e.platform).
-		WithMediaType(mediaType).
+		WithPlatform(e.resolvePlatform(meta, urlStr)).
 		WithAuthor(meta.Uploader, meta.UploaderID).
 		WithContent(meta.ID, meta.Title, meta.Description).
 		WithEngagement(maxInt64(meta.ViewCount, 0), maxInt64(meta.LikeCount, 0), maxInt64(meta.CommentCount, 0), 0).
 		WithAuthentication(opts.Cookie != "", opts.Source)
 
-	media := core.NewMedia(0, itemType, meta.Thumbnail)
+	variantTypes := make([]core.MediaType, 0, len(sources))
+	variants := make([]core.Variant, 0, len(sources))
 
 	for _, f := range sources {
+		classification := core.ClassifyMedia(f.MimeType, f.Ext, f.VCodec, f.ACodec)
 		variant := core.NewVariant(qualityForFormat(f), f.URL)
 		if f.Resolution != "" && f.Resolution != "audio only" {
 			variant = variant.WithResolution(f.Resolution)
 		}
-		if f.Ext != "" {
-			variant = variant.WithFormat(f.Ext)
+		if classification.Extension != "" {
+			variant = variant.WithFormat(classification.Extension)
+		}
+		if classification.Mime != "" {
+			variant = variant.WithMime(classification.Mime)
 		}
 		variant = variant.WithCodec(codecForFormat(f))
 		if f.Filesize > 0 {
@@ -139,19 +219,111 @@ func (e *PythonExtractor) Extract(urlStr string, opts core.ExtractOptions) (*cor
 		variant = variant.WithFormatID(f.FormatID)
 
 		// Generate filename: author_title_id_[DownAria].ext
-		extension := f.Ext
+		extension := classification.Extension
 		if extension == "" {
-			extension = core.GetExtensionFromMime("")
+			extension = core.ClassifyMedia("", meta.Ext, "", "").Extension
 		}
-		filename := core.GenerateFilename(meta.Uploader, meta.Title, meta.ID, extension)
+		if extension == "" {
+			extension = "bin"
+		}
+		filename := core.GenerateFilenameWithMeta(meta.Uploader, meta.Title, meta.UploaderID, meta.ID, extension)
 		variant = variant.WithFilename(filename)
 
+		variants = append(variants, variant)
+		variantTypes = append(variantTypes, classification.MediaType)
+	}
+
+	itemType := core.AggregateMediaTypes(variantTypes)
+	if itemType == core.MediaTypeUnknown {
+		itemType = core.ClassifyMedia("", meta.Ext, "", "").MediaType
+	}
+	if itemType == core.MediaTypeUnknown {
+		itemType = core.MediaTypeVideo
+	}
+
+	builder = builder.WithMediaType(itemType)
+
+	media := core.NewMedia(0, itemType, meta.Thumbnail)
+	for _, variant := range variants {
 		core.AddVariant(&media, variant)
 	}
 
 	builder.AddMedia(media)
 
-	return builder.Build(), nil
+	return builder.Build()
+}
+
+func rankVideoFormat(f core.YTDLPFormat) float64 {
+	if f.Height > 0 {
+		return float64(f.Height)*100000 + f.TBR
+	}
+	if q := strings.TrimSpace(f.Quality); q != "" {
+		if n, err := strconv.ParseFloat(q, 64); err == nil {
+			return n*100000 + f.TBR
+		}
+	}
+	if fid := strings.TrimSpace(f.FormatID); fid != "" {
+		if n, err := strconv.ParseFloat(fid, 64); err == nil {
+			return n*100000 + f.TBR
+		}
+	}
+	return f.TBR
+}
+
+var nonPlatformChars = regexp.MustCompile(`[^a-z0-9_-]+`)
+
+func (e *PythonExtractor) resolvePlatform(meta *core.YTDLPDumpJSON, targetURL string) string {
+	if static := normalizePlatformName(e.platform); static != "" {
+		return static
+	}
+
+	if meta != nil {
+		if fromExtractor := normalizePlatformName(meta.Extractor); fromExtractor != "" {
+			return fromExtractor
+		}
+		if fromWebpage := platformFromURL(meta.WebpageURL); fromWebpage != "" {
+			return fromWebpage
+		}
+	}
+
+	if fromTarget := platformFromURL(targetURL); fromTarget != "" {
+		return fromTarget
+	}
+
+	return "generic"
+}
+
+func normalizePlatformName(raw string) string {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	if value == "" {
+		return ""
+	}
+	if idx := strings.IndexAny(value, ":/ "); idx > 0 {
+		value = value[:idx]
+	}
+	value = strings.TrimSpace(nonPlatformChars.ReplaceAllString(value, ""))
+	if value == "" {
+		return ""
+	}
+	return value
+}
+
+func platformFromURL(rawURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return ""
+	}
+	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+	if host == "" {
+		return ""
+	}
+	host = strings.TrimPrefix(host, "www.")
+	host = strings.TrimPrefix(host, "m.")
+	parts := strings.Split(host, ".")
+	if len(parts) >= 2 {
+		return normalizePlatformName(parts[len(parts)-2])
+	}
+	return normalizePlatformName(host)
 }
 
 func maxInt64(value, fallback int64) int64 {

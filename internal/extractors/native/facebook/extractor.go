@@ -130,7 +130,7 @@ func (e *FacebookExtractor) Extract(urlStr string, opts core.ExtractOptions) (*c
 		if isImage {
 			ext = "jpg"
 		}
-		filename := core.GenerateFilename(metadata.Author, metadata.Title, "", ext)
+		filename := core.GenerateFilenameWithMeta(metadata.Author, metadata.Title, metadata.Author, "", ext)
 		variant = variant.WithFilename(filename)
 		core.AddVariant(&media, variant)
 	}

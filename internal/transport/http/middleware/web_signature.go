@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -24,6 +25,7 @@ const (
 	webSigHeaderSignature = "X-Downaria-Signature"
 	webSigMaxClockSkew    = 60 * time.Second
 	webSigNonceTTL        = 2 * time.Minute
+	webSigMaxBodyBytes    = 1 << 20
 )
 
 type nonceStore struct {
@@ -95,12 +97,15 @@ func RequireWebSignature(sharedSecret string) func(http.Handler) http.Handler {
 				return
 			}
 
-			body, err := io.ReadAll(r.Body)
+			body, err := readBodyForSignature(w, r)
 			if err != nil {
+				if errors.Is(err, errWebSigBodyTooLarge) {
+					response.WriteErrorRequest(w, r, apperrors.HTTPStatus(apperrors.CodeFileTooLarge), apperrors.CodeFileTooLarge, apperrors.Message(apperrors.CodeFileTooLarge))
+					return
+				}
 				response.WriteErrorRequest(w, r, apperrors.HTTPStatus(apperrors.CodeAccessDenied), apperrors.CodeAccessDenied, "failed to verify web signature")
 				return
 			}
-			r.Body.Close()
 			r.Body = io.NopCloser(bytes.NewReader(body))
 
 			expected := buildWebSignature(secret, r.Method, r.URL.Path, timestampRaw, nonce, body)
@@ -112,6 +117,31 @@ func RequireWebSignature(sharedSecret string) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+var errWebSigBodyTooLarge = errors.New("web signature body too large")
+
+func readBodyForSignature(w http.ResponseWriter, r *http.Request) ([]byte, error) {
+	if r == nil || r.Body == nil {
+		return nil, nil
+	}
+
+	if r.ContentLength > webSigMaxBodyBytes {
+		return nil, errWebSigBodyTooLarge
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, webSigMaxBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	_ = r.Body.Close()
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			return nil, errWebSigBodyTooLarge
+		}
+		return nil, err
+	}
+
+	return body, nil
 }
 
 func buildWebSignature(secret, method, path, timestamp, nonce string, body []byte) string {

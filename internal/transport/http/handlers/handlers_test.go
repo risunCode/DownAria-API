@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,7 +16,14 @@ import (
 	apperrors "downaria-api/internal/core/errors"
 	"downaria-api/internal/core/ports"
 	"downaria-api/internal/extractors/core"
+	"downaria-api/internal/shared/security"
 )
+
+type allowAllPublicResolver struct{}
+
+func (allowAllPublicResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
+	return []net.IPAddr{{IP: net.ParseIP("93.184.216.34")}}, nil
+}
 
 type mockStatsStore struct {
 	visitors    map[string]bool
@@ -89,6 +97,7 @@ func newTestHandler() *Handler {
 		Streamer:   nil,
 		extractor:  &mockExtractor{result: &core.ExtractResult{}},
 		headCache:  nil,
+		urlGuard:   security.NewOutboundURLValidator(allowAllPublicResolver{}),
 	}
 }
 
@@ -462,5 +471,21 @@ func TestMergeHandler_InvalidJSON(t *testing.T) {
 	err := response["error"].(map[string]interface{})
 	if err["code"] != "INVALID_JSON" {
 		t.Errorf("expected error code INVALID_JSON, got %v", err["code"])
+	}
+}
+
+func TestMergeHandler_Disabled(t *testing.T) {
+	h := newTestHandler()
+	h.config.MergeEnabled = false
+
+	body := strings.NewReader(`{"url":"https://youtu.be/abc"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/merge", body)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	h.Merge(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected status %d, got %d", http.StatusForbidden, rr.Code)
 	}
 }

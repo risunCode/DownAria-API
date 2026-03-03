@@ -35,12 +35,27 @@ func New(cfg config.Config) *Application {
 	limiter.SetClientIPLookup(func(r *http.Request) string {
 		return util.ClientIPFromRequestWithTrustedProxies(r, trustedProxies)
 	})
+
+	mergeRouteLimit := cfg.GlobalRateLimitLimit / 3
+	if mergeRouteLimit < 3 {
+		mergeRouteLimit = 3
+	}
+	mergeLimiter := middleware.NewRateLimiter(mergeRouteLimit, cfg.GlobalRateLimitWindow)
+	mergeLimiter.ConfigureBuckets(cfg.GlobalRateLimitMaxBuckets, cfg.GlobalRateLimitBucketTTL)
+	mergeLimiter.SetClientIPLookup(func(r *http.Request) string {
+		return util.ClientIPFromRequestWithTrustedProxies(r, trustedProxies)
+	})
+
 	handler := chain(
 		router,
 		middleware.CORS(cfg.AllowedOrigins),
 		middleware.RequestID,
 		middleware.StructuredLogging,
 		middleware.RateLimit(limiter),
+		middleware.RouteRateLimit([]middleware.RouteLimitRule{
+			{Method: http.MethodPost, Path: "/api/v1/merge", Limiter: mergeLimiter},
+			{Method: http.MethodPost, Path: "/api/web/merge", Limiter: mergeLimiter},
+		}),
 	)
 
 	port := strings.TrimSpace(cfg.Port)

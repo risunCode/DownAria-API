@@ -14,6 +14,7 @@ import (
 	"downaria-api/internal/infra/persistence"
 	"downaria-api/internal/shared/security"
 	"downaria-api/internal/shared/util"
+	"golang.org/x/sync/singleflight"
 )
 
 type Handler struct {
@@ -26,6 +27,7 @@ type Handler struct {
 	headCache  *cache.TTLCache
 	clientIPFn func(*http.Request) string
 	urlGuard   *security.OutboundURLValidator
+	headGroup  singleflight.Group
 }
 
 type statsStoreCloser interface {
@@ -43,24 +45,26 @@ func NewHandler(cfg config.Config, startedAt time.Time) *Handler {
 	if err != nil {
 		trustedProxies = nil
 	}
+	urlGuard := security.NewOutboundURLValidator(nil)
+	guardedClient := network.GetClientWithTimeoutGuard(cfg.UpstreamTimeout, urlGuard)
 
 	return &Handler{
 		config:     cfg,
 		startedAt:  startedAt,
-		httpClient: network.GetClientWithTimeout(cfg.UpstreamTimeout),
+		httpClient: guardedClient,
 		statsStore: persistence.NewPublicStatsStore(startedAt, persistence.PublicStatsPersistenceOptions{
 			Enabled:        cfg.StatsPersistEnabled,
 			FilePath:       cfg.StatsPersistFilePath,
 			FlushInterval:  cfg.StatsPersistFlushInterval,
 			FlushThreshold: cfg.StatsPersistFlushThreshold,
 		}),
-		Streamer:  network.NewStreamer(),
+		Streamer:  network.NewStreamerWithClient(guardedClient),
 		extractor: cachedExtractor,
 		headCache: cache.NewTTLCacheWithMaxEntries(2048),
 		clientIPFn: func(r *http.Request) string {
 			return util.ClientIPFromRequestWithTrustedProxies(r, trustedProxies)
 		},
-		urlGuard: security.NewOutboundURLValidator(nil),
+		urlGuard: urlGuard,
 	}
 }
 

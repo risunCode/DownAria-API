@@ -102,19 +102,99 @@ func TestExtractionService_Extract_InvalidURL(t *testing.T) {
 	}
 }
 
-func TestExtractionService_Extract_UnsupportedPlatform(t *testing.T) {
+func TestExtractionService_Extract_UnknownNonNativeURLFallsBackToGenericExtractor(t *testing.T) {
 	reg := registry.NewRegistry()
-	svc := NewService(reg, 30, 3, 0)
+
+	fallbackCalls := 0
+	svc := NewService(reg, 30, 3, 0, WithFallbackExtractorFactory(func() core.Extractor {
+		return extractorFunc(func(url string, opts core.ExtractOptions) (*core.ExtractResult, error) {
+			fallbackCalls++
+			if opts.Source != core.AuthSourceNone {
+				t.Fatalf("expected fallback first lane to be unauthenticated, got %s", opts.Source)
+			}
+			return &core.ExtractResult{URL: url, Platform: "reddit"}, nil
+		})
+	}))
+
+	result, err := svc.Extract(context.Background(), ExtractInput{
+		URL: "https://reddit.com/r/golang/comments/123",
+	})
+
+	if err != nil {
+		t.Fatalf("expected fallback success, got err=%v", err)
+	}
+	if fallbackCalls != 1 {
+		t.Fatalf("expected fallback extractor to be called once, got %d", fallbackCalls)
+	}
+	if result.Platform != "reddit" {
+		t.Fatalf("expected metadata-driven platform from fallback extractor, got %q", result.Platform)
+	}
+}
+
+func TestExtractionService_Extract_NativePatternMissDoesNotFallback(t *testing.T) {
+	reg := registry.NewRegistry()
+
+	fallbackCalls := 0
+	svc := NewService(reg, 30, 3, 0, WithFallbackExtractorFactory(func() core.Extractor {
+		fallbackCalls++
+		return extractorFunc(func(url string, opts core.ExtractOptions) (*core.ExtractResult, error) {
+			return &core.ExtractResult{URL: url, Platform: "generic"}, nil
+		})
+	}))
 
 	_, err := svc.Extract(context.Background(), ExtractInput{
-		URL: "https://unknown-platform.com/video/123",
+		URL: "https://instagram.com/p/abc123",
 	})
 
 	if err == nil {
-		t.Fatal("expected error for unsupported platform, got nil")
+		t.Fatalf("expected unsupported platform error for native URL miss")
 	}
 	if !errors.Is(err, ErrUnsupportedPlatform) {
-		t.Errorf("expected ErrUnsupportedPlatform, got %v", err)
+		t.Fatalf("expected ErrUnsupportedPlatform, got %v", err)
+	}
+	if fallbackCalls != 0 {
+		t.Fatalf("expected fallback factory not to be called for native URL miss, got %d", fallbackCalls)
+	}
+}
+
+func TestExtractionService_FallbackSkipsServerCookieLane(t *testing.T) {
+	reg := registry.NewRegistry()
+
+	var seenSources []core.AuthSource
+	var seenCookies []string
+	svc := NewService(reg, 30, 1, 0,
+		WithServerCookies(map[string]string{"unknown-platform": "sid=server"}),
+		WithFallbackExtractorFactory(func() core.Extractor {
+			return extractorFunc(func(url string, opts core.ExtractOptions) (*core.ExtractResult, error) {
+				seenSources = append(seenSources, opts.Source)
+				seenCookies = append(seenCookies, opts.Cookie)
+				switch opts.Source {
+				case core.AuthSourceNone:
+					return nil, fmt.Errorf("HTTP 401: Unauthorized")
+				case core.AuthSourceClient:
+					return &core.ExtractResult{URL: url, Platform: "example"}, nil
+				default:
+					return nil, fmt.Errorf("unexpected auth source")
+				}
+			})
+		}),
+	)
+
+	_, err := svc.Extract(context.Background(), ExtractInput{URL: "https://unknown.example/video/1", Cookie: "sid=user"})
+	if err != nil {
+		t.Fatalf("expected fallback lane progression success, got %v", err)
+	}
+
+	if len(seenSources) != 2 {
+		t.Fatalf("expected exactly guest and user lanes, got %d calls", len(seenSources))
+	}
+	if seenSources[0] != core.AuthSourceNone || seenSources[1] != core.AuthSourceClient {
+		t.Fatalf("expected lane order none->client, got %v", seenSources)
+	}
+	for _, cookie := range seenCookies {
+		if cookie == "sid=server" {
+			t.Fatalf("did not expect server cookie lane in fallback mode")
+		}
 	}
 }
 

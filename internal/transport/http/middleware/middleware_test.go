@@ -353,3 +353,37 @@ func TestRequestID(t *testing.T) {
 		}
 	})
 }
+
+func TestRouteRateLimit_AppliesOnlyConfiguredRoute(t *testing.T) {
+	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	routeLimiter := NewRateLimiter(1, time.Minute)
+	mw := RouteRateLimit([]RouteLimitRule{{Method: http.MethodPost, Path: "/api/v1/merge", Limiter: routeLimiter}})
+	h := mw(nextHandler)
+
+	postReq1 := httptest.NewRequest(http.MethodPost, "/api/v1/merge", nil)
+	postReq1.RemoteAddr = "192.168.1.90:12345"
+	postRes1 := httptest.NewRecorder()
+	h.ServeHTTP(postRes1, postReq1)
+	if postRes1.Code != http.StatusOK {
+		t.Fatalf("expected first merge request status %d, got %d", http.StatusOK, postRes1.Code)
+	}
+
+	postReq2 := httptest.NewRequest(http.MethodPost, "/api/v1/merge", nil)
+	postReq2.RemoteAddr = "192.168.1.90:12345"
+	postRes2 := httptest.NewRecorder()
+	h.ServeHTTP(postRes2, postReq2)
+	if postRes2.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected second merge request status %d, got %d", http.StatusTooManyRequests, postRes2.Code)
+	}
+
+	cheapReq := httptest.NewRequest(http.MethodGet, "/api/v1/proxy", nil)
+	cheapReq.RemoteAddr = "192.168.1.90:12345"
+	cheapRes := httptest.NewRecorder()
+	h.ServeHTTP(cheapRes, cheapReq)
+	if cheapRes.Code != http.StatusOK {
+		t.Fatalf("expected cheap route status %d, got %d", http.StatusOK, cheapRes.Code)
+	}
+}

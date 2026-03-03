@@ -57,37 +57,42 @@ func (v *OutboundURLValidator) Validate(ctx context.Context, rawURL string) (*ur
 		return nil, errors.New("validator is nil")
 	}
 
-	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	parsed, err := SanitizeHTTPURL(rawURL)
 	if err != nil {
-		return nil, errors.New("invalid url")
-	}
-
-	scheme := strings.ToLower(strings.TrimSpace(parsed.Scheme))
-	if scheme != "http" && scheme != "https" {
-		return nil, errors.New("unsupported scheme")
+		return nil, err
 	}
 
 	host := strings.TrimSpace(parsed.Hostname())
+
+	if err := v.ValidateHost(ctx, host); err != nil {
+		return nil, err
+	}
+
+	return parsed, nil
+}
+
+func (v *OutboundURLValidator) ValidateHost(ctx context.Context, host string) error {
+	host = strings.TrimSpace(host)
 	if host == "" {
-		return nil, errors.New("missing host")
+		return errors.New("blocked host")
 	}
 
 	if isLocalhostHost(host) {
-		return nil, errors.New("blocked host")
+		return errors.New("blocked host")
 	}
 
 	addresses, err := v.resolveHost(ctx, host)
 	if err != nil {
-		return nil, errors.New("unable to resolve host")
+		return errors.New("unable to resolve host")
 	}
 
 	for _, addr := range addresses {
 		if v.isBlocked(addr) {
-			return nil, errors.New("blocked destination")
+			return errors.New("blocked destination")
 		}
 	}
 
-	return parsed, nil
+	return nil
 }
 
 func (v *OutboundURLValidator) resolveHost(ctx context.Context, host string) ([]netip.Addr, error) {

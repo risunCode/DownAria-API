@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -186,5 +187,37 @@ func TestRouter_Settings(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+}
+
+func TestRouter_MergeDisabledReturnsForbidden(t *testing.T) {
+	cfg := config.Config{MergeEnabled: false}
+	h := handlers.NewHandler(cfg, time.Now())
+	router := NewRouter(h, cfg)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/merge", strings.NewReader(`{"url":"https://youtu.be/abc"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected status %d, got %d", http.StatusForbidden, rec.Code)
+	}
+}
+
+func TestRouter_MergeV1HiddenWhenWebSecretConfigured(t *testing.T) {
+	cfg := config.Config{MergeEnabled: true, WebInternalSharedSecret: "secret"}
+	h := handlers.NewHandler(cfg, time.Now())
+	router := NewRouter(h, cfg)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/merge", strings.NewReader(`{"url":"https://youtu.be/abc"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected status %d, got %d", http.StatusNotFound, rec.Code)
 	}
 }

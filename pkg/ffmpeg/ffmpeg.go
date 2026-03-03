@@ -8,7 +8,11 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+
+	extractorcore "downaria-api/internal/extractors/core"
 )
+
+const maxFFmpegStderrBytes = 64 << 10
 
 type FFmpeg struct {
 	path string
@@ -102,6 +106,8 @@ func (f *FFmpeg) StreamMerge(ctx context.Context, opts MergeOptions) (*FFmpegRes
 	if err != nil {
 		return nil, err
 	}
+	stderr := extractorcore.NewBoundedBuffer(maxFFmpegStderrBytes)
+	cmd.Stderr = stderr
 
 	if err := cmd.Start(); err != nil {
 		return nil, err
@@ -110,6 +116,7 @@ func (f *FFmpeg) StreamMerge(ctx context.Context, opts MergeOptions) (*FFmpegRes
 	return &FFmpegResult{
 		Stdout: stdout,
 		Cmd:    cmd,
+		stderr: stderr,
 	}, nil
 }
 
@@ -129,14 +136,26 @@ func (f *FFmpeg) StreamExtractAudio(ctx context.Context, opts AudioExtractOption
 	}
 
 	codec := strings.TrimSpace(opts.AudioCodec)
-	if codec == "" {
-		codec = "libmp3lame"
-	}
-
 	format := strings.ToLower(strings.TrimSpace(opts.OutputExt))
 	if format == "" {
 		format = "mp3"
 	}
+
+	// Resolve actual audio codec based on format if not specified
+	if codec == "" {
+		if format == "m4a" || format == "aac" {
+			codec = "aac"
+		} else if format == "mp3" {
+			codec = "libmp3lame"
+		} else if format == "opus" {
+			codec = "libopus"
+		} else {
+			codec = "libmp3lame" // fallback
+		}
+	}
+
+	// Normalize codec names
+	codecLower := strings.ToLower(codec)
 
 	args = append(args,
 		"-i", opts.InputURL,
@@ -144,10 +163,13 @@ func (f *FFmpeg) StreamExtractAudio(ctx context.Context, opts AudioExtractOption
 		"-c:a", codec,
 	)
 
-	if codec == "aac" {
+	// Set bitrate/quality based on codec
+	if codecLower == "aac" || strings.Contains(codecLower, "aac") {
 		args = append(args, "-b:a", "192k")
+	} else if codecLower == "libopus" || strings.Contains(codecLower, "opus") {
+		args = append(args, "-b:a", "128k")
 	} else {
-		args = append(args, "-q:a", "0")
+		args = append(args, "-q:a", "0") // VBR for mp3
 	}
 
 	args = append(args,
@@ -160,17 +182,20 @@ func (f *FFmpeg) StreamExtractAudio(ctx context.Context, opts AudioExtractOption
 	if err != nil {
 		return nil, err
 	}
+	stderr := extractorcore.NewBoundedBuffer(maxFFmpegStderrBytes)
+	cmd.Stderr = stderr
 
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
 
-	return &FFmpegResult{Stdout: stdout, Cmd: cmd}, nil
+	return &FFmpegResult{Stdout: stdout, Cmd: cmd, stderr: stderr}, nil
 }
 
 type FFmpegResult struct {
 	Stdout io.ReadCloser
 	Cmd    *exec.Cmd
+	stderr *extractorcore.BoundedBuffer
 }
 
 func (r *FFmpegResult) Close() error {
@@ -184,5 +209,18 @@ func (r *FFmpegResult) Close() error {
 }
 
 func (r *FFmpegResult) Wait() error {
-	return r.Cmd.Wait()
+	if r == nil || r.Cmd == nil {
+		return nil
+	}
+	err := r.Cmd.Wait()
+	if err == nil {
+		return nil
+	}
+	if r.stderr != nil {
+		errText := strings.TrimSpace(r.stderr.String())
+		if errText != "" {
+			return fmt.Errorf("%w: %s", err, errText)
+		}
+	}
+	return err
 }

@@ -1,47 +1,43 @@
 # Configuration
 
-Configuration is loaded from environment variables in `internal/core/config/loader.go`.
+Configuration is loaded from `internal/core/config/loader.go`.
 
-## Core server settings
+## Runtime and security
 
 | Variable | Default | Notes |
 |---|---|---|
-| `PORT` | `8080` | Accepts raw port (`8080`), `:8080`, `host:port`, URL, or `tcp/8080`; normalized to numeric port. |
-| `ALLOWED_ORIGINS` | _(empty)_ | Comma-separated list. Empty means wildcard behavior in CORS middleware. |
+| `PORT` | `8080` | Accepts `8080`, `:8080`, `host:port`, URL, or `tcp/8080`; normalized to numeric port. |
+| `ALLOWED_ORIGINS` | _(empty)_ | Comma-separated origin allowlist used by CORS and `/api/web/*` origin middleware. Empty behaves as allow-all in origin middleware. |
+| `TRUSTED_PROXY_CIDRS` | _(empty)_ | Comma-separated trusted proxy CIDRs/IPs for client IP resolution in rate limiting and stats. |
+| `WEB_INTERNAL_SHARED_SECRET` | _(empty in loader)_ | Required by `cmd/server/main.go` at startup; used to verify `/api/web/*` signatures. |
 | `PUBLIC_BASE_URL` | `http://localhost:<PORT>` | Returned by `/api/settings`. |
-| `UPSTREAM_TIMEOUT_MS` | `10000` | Upstream HTTP timeout in milliseconds. Minimum effective value is `1`. |
-| `GLOBAL_RATE_LIMIT_WINDOW` | `60/1m` | Global IP rate limit in `<limit>/<window>` format. Supports Go duration literals plus friendly forms (`5min`, `1hour`). |
-| `MAX_DOWNLOAD_SIZE_MB` | `1024` | Max allowed proxied file size based on `Content-Length`. |
-| `MERGE_ENABLED` | `false` | Exposed in `/api/settings`. Merge route exists regardless of this flag. |
 
-## Extraction retry settings
+## Rate limiting
 
 | Variable | Default | Notes |
 |---|---|---|
-| `EXTRACTION_MAX_RETRIES` | `3` | Total attempts including first try. Minimum effective value is `1`. |
-| `EXTRACTION_RETRY_DELAY_MS` | `500` | Base delay for exponential backoff (`x2` each retry, capped at `30s`). |
+| `GLOBAL_RATE_LIMIT_WINDOW` | `60/1m` | Global IP rate limit in `<limit>/<window>` format; supports Go duration plus friendly suffixes (`min`, `hour`, `sec`). |
+| `GLOBAL_RATE_LIMIT_MAX_BUCKETS` | `10000` | In-memory bucket cap. Values `<100` fall back to `10000`. |
+| `GLOBAL_RATE_LIMIT_BUCKET_TTL` | `10m` | Idle bucket TTL before cleanup/eviction. |
 
-## Cache settings
-
-### Extraction result cache
-
-| Variable | Default | Notes |
-|---|---|---|
-| `CACHE_EXTRACTION_TTL` | `5m` | Global extraction cache TTL used for all platforms. |
-
-The extraction cache key includes URL and cookie hash, so authenticated and unauthenticated requests do not collide.
-
-### Proxy HEAD metadata cache
+## HTTP server and upstream timeouts
 
 | Variable | Default | Notes |
 |---|---|---|
-| `CACHE_PROXY_HEAD_TTL` | `45s` | Parsed into config, but current proxy handler uses fixed internal TTL of `45s`. |
+| `UPSTREAM_TIMEOUT_MS` | `10000` | Outbound HTTP timeout. Values `<1` fall back to `10000`. |
+| `SERVER_READ_TIMEOUT` | `15s` | Server read timeout. |
+| `SERVER_READ_HEADER_TIMEOUT` | `10s` | Server read-header timeout. |
+| `SERVER_WRITE_TIMEOUT` | `15m` | Server write timeout (loader default). |
+| `SERVER_IDLE_TIMEOUT` | `60s` | Server idle timeout. |
+| `SERVER_MAX_HEADER_BYTES` | `1048576` | Max request header bytes. Values `<1024` fall back to `1048576`. |
 
-### Cache maintenance
+## Merge and transfer limits
 
 | Variable | Default | Notes |
 |---|---|---|
-| `CACHE_CLEANUP_INTERVAL` | `5m` | Loaded into config for cache cleanup scheduling; not currently wired to a cleanup loop. |
+| `MERGE_ENABLED` | `false` | Merge handler gate. Route exists but returns access denied when disabled. |
+| `MAX_DOWNLOAD_SIZE_MB` | `1024` | Max download-mode size for proxy/download handlers. Preview/proxy mode uses a larger internal ceiling. |
+| `MAX_MERGE_OUTPUT_SIZE_MB` | `512` | Max output stream size for merge/audio-conversion responses. |
 
 ## Stats persistence and buffering
 
@@ -49,26 +45,49 @@ The extraction cache key includes URL and cookie hash, so authenticated and unau
 |---|---|---|
 | `STATS_PERSIST_ENABLED` | `false` | Enables persisted public stats. |
 | `STATS_PERSIST_FILE_PATH` | `./data/public_stats.json` | Atomic write target path. |
-| `STATS_PERSIST_FLUSH_INTERVAL_MS` | `5000` | Time-based flush interval (`>=1000ms`). |
+| `STATS_PERSIST_FLUSH_INTERVAL_MS` | `5000` | Flush interval in milliseconds (`>=1000`). |
 | `STATS_PERSIST_FLUSH_THRESHOLD` | `10` | Flush after N buffered stat events (`>=1`). |
 
-With persistence enabled, stat updates are buffered and flushed asynchronously by threshold or interval, plus one final flush on graceful shutdown.
+## Extraction and cache behavior
+
+| Variable | Default | Notes |
+|---|---|---|
+| `EXTRACTION_MAX_RETRIES` | `3` | Total extraction attempts; minimum effective value is `1`. |
+| `EXTRACTION_RETRY_DELAY_MS` | `500` | Base retry delay in milliseconds. |
+| `CACHE_EXTRACTION_TTL` | `5m` | Extraction cache TTL. |
+| `CACHE_PROXY_HEAD_TTL` | `45s` | Proxy HEAD metadata cache TTL. |
+| `CACHE_CLEANUP_INTERVAL` | `5m` | General cache cleanup interval config value. |
 
 ## Example `.env`
 
 ```env
 PORT=8080
 ALLOWED_ORIGINS=http://127.0.0.1:3000,http://localhost:3000
+TRUSTED_PROXY_CIDRS=127.0.0.1/32,10.0.0.0/8
+WEB_INTERNAL_SHARED_SECRET=replace-with-random-secret
 PUBLIC_BASE_URL=https://api.example.com
 
 UPSTREAM_TIMEOUT_MS=15000
+SERVER_READ_TIMEOUT=15s
+SERVER_READ_HEADER_TIMEOUT=10s
+SERVER_WRITE_TIMEOUT=15m
+SERVER_IDLE_TIMEOUT=60s
+SERVER_MAX_HEADER_BYTES=1048576
+
 GLOBAL_RATE_LIMIT_WINDOW=200/4min
+GLOBAL_RATE_LIMIT_MAX_BUCKETS=10000
+GLOBAL_RATE_LIMIT_BUCKET_TTL=10m
+
+MERGE_ENABLED=true
 MAX_DOWNLOAD_SIZE_MB=1024
+MAX_MERGE_OUTPUT_SIZE_MB=512
 
 EXTRACTION_MAX_RETRIES=3
 EXTRACTION_RETRY_DELAY_MS=500
 
 CACHE_EXTRACTION_TTL=5m
+CACHE_PROXY_HEAD_TTL=45s
+CACHE_CLEANUP_INTERVAL=5m
 
 STATS_PERSIST_ENABLED=true
 STATS_PERSIST_FILE_PATH=./data/public_stats.json

@@ -9,12 +9,14 @@ import (
 
 	"downaria-api/internal/extractors/core"
 	"downaria-api/internal/infra/cache"
+	"golang.org/x/sync/singleflight"
 )
 
 type cachedService struct {
 	next      Service
 	cache     *cache.TTLCache
 	ttlConfig cache.PlatformTTLConfig
+	missGroup singleflight.Group
 }
 
 func NewCachedService(next Service, ttlConfig cache.PlatformTTLConfig) Service {
@@ -33,19 +35,35 @@ func (s *cachedService) Extract(ctx context.Context, input ExtractInput) (*core.
 		}
 	}
 
-	result, err := s.next.Extract(ctx, input)
+	v, err, _ := s.missGroup.Do(key, func() (any, error) {
+		if value, ok := s.cache.Get(key); ok {
+			if result, castOK := value.(*core.ExtractResult); castOK && result != nil {
+				return cloneExtractResult(result), nil
+			}
+		}
+
+		result, extractErr := s.next.Extract(ctx, input)
+		if extractErr != nil {
+			return nil, extractErr
+		}
+
+		if result == nil {
+			return (*core.ExtractResult)(nil), nil
+		}
+
+		stored := cloneExtractResult(result)
+		s.cache.Set(key, stored, s.ttlConfig.TTLForPlatform(stored.Platform))
+		return cloneExtractResult(stored), nil
+	})
 	if err != nil {
 		return nil, err
 	}
 
+	result, _ := v.(*core.ExtractResult)
 	if result == nil {
 		return nil, nil
 	}
-
-	stored := cloneExtractResult(result)
-	s.cache.Set(key, stored, s.ttlConfig.TTLForPlatform(stored.Platform))
-
-	return cloneExtractResult(stored), nil
+	return cloneExtractResult(result), nil
 }
 
 func buildExtractCacheKey(rawURL string, rawCookie string) string {

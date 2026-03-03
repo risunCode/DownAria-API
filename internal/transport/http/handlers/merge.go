@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,10 +14,10 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	apperrors "downaria-api/internal/core/errors"
 	extractorcore "downaria-api/internal/extractors/core"
-	"downaria-api/internal/shared/security"
 	"downaria-api/internal/shared/util"
 	"downaria-api/internal/transport/http/middleware"
 	"downaria-api/pkg/ffmpeg"
@@ -39,6 +40,16 @@ func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
 		WithAccessMode("public").
 		WithPublicContent(true)
 
+	if !h.config.MergeEnabled {
+		_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeAccessDenied), apperrors.CodeAccessDenied, "merge endpoint is disabled")
+		return
+	}
+
+	if strings.TrimSpace(h.config.WebInternalSharedSecret) != "" && strings.HasPrefix(r.URL.Path, "/api/v1/") {
+		_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeAccessDenied), apperrors.CodeAccessDenied, "merge endpoint is restricted to signed /api/web routes")
+		return
+	}
+
 	defer r.Body.Close()
 
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
@@ -51,33 +62,94 @@ func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
 	}
 
 	targetURL := strings.TrimSpace(req.URL)
+	videoURL := strings.TrimSpace(req.VideoURL)
+	audioURL := strings.TrimSpace(req.AudioURL)
+	usesDirectPair := videoURL != "" || audioURL != ""
+
+	if usesDirectPair {
+		if videoURL == "" || audioURL == "" {
+			_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeMissingParams), apperrors.CodeMissingParams, "videoUrl and audioUrl are required together")
+			return
+		}
+	}
+
 	if targetURL == "" {
-		_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeMissingParams), apperrors.CodeMissingParams, "url is required")
-		return
+		if !usesDirectPair {
+			_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeMissingParams), apperrors.CodeMissingParams, "url is required")
+			return
+		}
 	}
 	audioOnly := isAudioOnlyRequest(req)
 
-	if !isYouTubeURL(targetURL) && !audioOnly {
+	if !usesDirectPair && !isYouTubeURL(targetURL) && !audioOnly {
 		_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeInvalidURL), apperrors.CodeInvalidURL, "video merge fast-path only supports YouTube URLs")
 		return
 	}
 
 	requestID := middleware.RequestIDFromContext(r.Context())
-	guard := h.urlGuard
-	if guard == nil {
-		guard = security.NewOutboundURLValidator(nil)
+	if !usesDirectPair {
+		validatedTargetURL, err := h.sanitizeAndValidateOutboundURL(r.Context(), targetURL)
+		if err != nil {
+			log.Printf("request_id=%s component=merge event=url_validation_failed err=%s", requestID, redactLogError(err))
+			_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeInvalidURL), apperrors.CodeInvalidURL, "url is required and must point to a public http/https destination")
+			return
+		}
+		targetURL = validatedTargetURL
 	}
-	validatedTargetURL, err := guard.Validate(r.Context(), targetURL)
-	if err != nil {
-		log.Printf("request_id=%s component=merge event=url_validation_failed err=%v", requestID, err)
-		_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeInvalidURL), apperrors.CodeInvalidURL, "url is required and must point to a public http/https destination")
-		return
-	}
-	targetURL = validatedTargetURL.String()
 
 	ff := ffmpeg.New()
 	if ff == nil {
 		_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeFFmpegUnavailable), apperrors.CodeFFmpegUnavailable, apperrors.Message(apperrors.CodeFFmpegUnavailable))
+		return
+	}
+
+	if usesDirectPair {
+		validatedVideoURL, validateVideoErr := h.sanitizeAndValidateOutboundURL(r.Context(), videoURL)
+		if validateVideoErr != nil {
+			log.Printf("request_id=%s component=merge event=direct_video_url_blocked err=%s", requestID, redactLogError(validateVideoErr))
+			_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeInvalidURL), apperrors.CodeInvalidURL, "videoUrl must point to a public http/https destination")
+			return
+		}
+
+		validatedAudioURL, validateAudioErr := h.sanitizeAndValidateOutboundURL(r.Context(), audioURL)
+		if validateAudioErr != nil {
+			log.Printf("request_id=%s component=merge event=direct_audio_url_blocked err=%s", requestID, redactLogError(validateAudioErr))
+			_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeInvalidURL), apperrors.CodeInvalidURL, "audioUrl must point to a public http/https destination")
+			return
+		}
+
+		mergeHeaders := buildMergeHeaders(validatedVideoURL, requestID)
+		ffmpegCtx, cancelFFmpeg := withCommandTimeout(r.Context(), 4*time.Minute)
+		defer cancelFFmpeg()
+
+		result, err := ff.StreamMerge(ffmpegCtx, ffmpeg.MergeOptions{
+			VideoURL:  validatedVideoURL,
+			AudioURL:  validatedAudioURL,
+			UserAgent: resolveUserAgent(req.UserAgent),
+			Headers:   mergeHeaders,
+		})
+		if err != nil {
+			log.Printf("request_id=%s component=merge event=direct_merge_start_failed err=%s", requestID, redactLogError(err))
+			_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeMergeFailed), apperrors.CodeMergeFailed, "failed to start merge process")
+			return
+		}
+		defer result.Close()
+
+		filename := ensureFileExtension(req.Filename, "mp4")
+		maxOutputBytes := int64(h.config.MaxMergeOutputSizeMB) * 1024 * 1024
+		if err := writeFFmpegResultAsAttachment(w, result, filename, "video/mp4", maxOutputBytes); err != nil {
+			if errors.Is(err, errMergeOutputExceeded) {
+				_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeFileTooLarge), apperrors.CodeFileTooLarge, fmt.Sprintf("merged output exceeds maximum %d MB", h.config.MaxMergeOutputSizeMB))
+				return
+			}
+			if errors.Is(err, errMergeResponseWriteFailed) {
+				log.Printf("request_id=%s component=merge event=direct_merged_response_write_failed err=%s", requestID, redactLogError(err))
+				return
+			}
+			log.Printf("request_id=%s component=merge event=direct_merged_output_failed err=%s", requestID, redactLogError(err))
+			_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeMergeFailed), apperrors.CodeMergeFailed, "failed to finalize merged output")
+			return
+		}
 		return
 	}
 
@@ -89,9 +161,11 @@ func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
 
 		if isYouTubeURL(targetURL) {
 			selector := buildYTDLPFormatSelector(req.Quality, true)
-			urls, err := extractorcore.RunYtDlpGetURLs(r.Context(), targetURL, selector)
+			ytCtx, cancelYTDLP := withCommandTimeout(r.Context(), 35*time.Second)
+			urls, err := extractorcore.RunYtDlpGetURLs(ytCtx, targetURL, selector)
+			cancelYTDLP()
 			if err != nil {
-				log.Printf("request_id=%s component=merge event=ytdlp_audio_resolve_failed err=%v", requestID, err)
+				log.Printf("request_id=%s component=merge event=ytdlp_audio_resolve_failed err=%s", requestID, redactLogError(err))
 				_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeMergeFailed), apperrors.CodeMergeFailed, "failed to resolve media stream")
 				return
 			}
@@ -100,16 +174,18 @@ func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			validatedInputURL, validateErr := guard.Validate(r.Context(), urls[0])
+			validatedInputURL, validateErr := h.sanitizeAndValidateOutboundURL(r.Context(), urls[0])
 			if validateErr != nil {
-				log.Printf("request_id=%s component=merge event=ytdlp_audio_url_blocked err=%v", requestID, validateErr)
+				log.Printf("request_id=%s component=merge event=ytdlp_audio_url_blocked err=%s", requestID, redactLogError(validateErr))
 				_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeMergeFailed), apperrors.CodeMergeFailed, "resolved stream URL is not allowed")
 				return
 			}
-			inputURL = validatedInputURL.String()
+			inputURL = validatedInputURL
 		}
 
-		result, err := ff.StreamExtractAudio(r.Context(), ffmpeg.AudioExtractOptions{
+		ffmpegCtx, cancelFFmpeg := withCommandTimeout(r.Context(), 4*time.Minute)
+		defer cancelFFmpeg()
+		result, err := ff.StreamExtractAudio(ffmpegCtx, ffmpeg.AudioExtractOptions{
 			InputURL:   inputURL,
 			OutputExt:  audioFormat,
 			AudioCodec: codec,
@@ -117,7 +193,7 @@ func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
 			Headers:    mergeHeaders,
 		})
 		if err != nil {
-			log.Printf("request_id=%s component=merge event=audio_extract_start_failed err=%v", requestID, err)
+			log.Printf("request_id=%s component=merge event=audio_extract_start_failed err=%s", requestID, redactLogError(err))
 			_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeMergeFailed), apperrors.CodeMergeFailed, "failed to process audio stream")
 			return
 		}
@@ -131,10 +207,10 @@ func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if errors.Is(err, errMergeResponseWriteFailed) {
-				log.Printf("request_id=%s component=merge event=audio_response_write_failed err=%v", requestID, err)
+				log.Printf("request_id=%s component=merge event=audio_response_write_failed err=%s", requestID, redactLogError(err))
 				return
 			}
-			log.Printf("request_id=%s component=merge event=audio_output_failed err=%v", requestID, err)
+			log.Printf("request_id=%s component=merge event=audio_output_failed err=%s", requestID, redactLogError(err))
 			_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeMergeFailed), apperrors.CodeMergeFailed, "failed to finalize audio output")
 			return
 		}
@@ -142,9 +218,11 @@ func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
 	}
 
 	selector := buildYTDLPFormatSelector(req.Quality, false)
-	urls, err := extractorcore.RunYtDlpGetURLs(r.Context(), targetURL, selector)
+	ytCtx, cancelYTDLP := withCommandTimeout(r.Context(), 35*time.Second)
+	urls, err := extractorcore.RunYtDlpGetURLs(ytCtx, targetURL, selector)
+	cancelYTDLP()
 	if err != nil {
-		log.Printf("request_id=%s component=merge event=ytdlp_stream_resolve_failed err=%v", requestID, err)
+		log.Printf("request_id=%s component=merge event=ytdlp_stream_resolve_failed err=%s", requestID, redactLogError(err))
 		_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeMergeFailed), apperrors.CodeMergeFailed, "failed to resolve media streams")
 		return
 	}
@@ -154,27 +232,29 @@ func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	validatedVideoURL, validateVideoErr := guard.Validate(r.Context(), urls[0])
+	validatedVideoURL, validateVideoErr := h.sanitizeAndValidateOutboundURL(r.Context(), urls[0])
 	if validateVideoErr != nil {
-		log.Printf("request_id=%s component=merge event=ytdlp_video_url_blocked err=%v", requestID, validateVideoErr)
+		log.Printf("request_id=%s component=merge event=ytdlp_video_url_blocked err=%s", requestID, redactLogError(validateVideoErr))
 		_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeMergeFailed), apperrors.CodeMergeFailed, "resolved video stream URL is not allowed")
 		return
 	}
-	validatedAudioURL, validateAudioErr := guard.Validate(r.Context(), urls[1])
+	validatedAudioURL, validateAudioErr := h.sanitizeAndValidateOutboundURL(r.Context(), urls[1])
 	if validateAudioErr != nil {
-		log.Printf("request_id=%s component=merge event=ytdlp_audio_url_blocked err=%v", requestID, validateAudioErr)
+		log.Printf("request_id=%s component=merge event=ytdlp_audio_url_blocked err=%s", requestID, redactLogError(validateAudioErr))
 		_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeMergeFailed), apperrors.CodeMergeFailed, "resolved audio stream URL is not allowed")
 		return
 	}
 
-	result, err := ff.StreamMerge(r.Context(), ffmpeg.MergeOptions{
-		VideoURL:  validatedVideoURL.String(),
-		AudioURL:  validatedAudioURL.String(),
+	ffmpegCtx, cancelFFmpeg := withCommandTimeout(r.Context(), 4*time.Minute)
+	defer cancelFFmpeg()
+	result, err := ff.StreamMerge(ffmpegCtx, ffmpeg.MergeOptions{
+		VideoURL:  validatedVideoURL,
+		AudioURL:  validatedAudioURL,
 		UserAgent: resolveUserAgent(req.UserAgent),
 		Headers:   mergeHeaders,
 	})
 	if err != nil {
-		log.Printf("request_id=%s component=merge event=merge_start_failed err=%v", requestID, err)
+		log.Printf("request_id=%s component=merge event=merge_start_failed err=%s", requestID, redactLogError(err))
 		_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeMergeFailed), apperrors.CodeMergeFailed, "failed to start merge process")
 		return
 	}
@@ -188,13 +268,26 @@ func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if errors.Is(err, errMergeResponseWriteFailed) {
-			log.Printf("request_id=%s component=merge event=merged_response_write_failed err=%v", requestID, err)
+			log.Printf("request_id=%s component=merge event=merged_response_write_failed err=%s", requestID, redactLogError(err))
 			return
 		}
-		log.Printf("request_id=%s component=merge event=merged_output_failed err=%v", requestID, err)
+		log.Printf("request_id=%s component=merge event=merged_output_failed err=%s", requestID, redactLogError(err))
 		_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeMergeFailed), apperrors.CodeMergeFailed, "failed to finalize merged output")
 		return
 	}
+}
+
+func withCommandTimeout(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	if timeout <= 0 {
+		return context.WithCancel(parent)
+	}
+	if deadline, ok := parent.Deadline(); ok && time.Until(deadline) <= timeout {
+		return context.WithCancel(parent)
+	}
+	return context.WithTimeout(parent, timeout)
 }
 
 var errMergeOutputExceeded = errors.New("merge output exceeds configured limit")
@@ -270,23 +363,11 @@ func buildMergeHeaders(targetURL, requestID string) map[string]string {
 		headers["X-Request-ID"] = reqID
 	}
 
-	lowerURL := strings.ToLower(targetURL)
-	switch {
-	case strings.Contains(lowerURL, "youtube.com") || strings.Contains(lowerURL, "googlevideo.com") || strings.Contains(lowerURL, "youtu.be"):
-		headers["Referer"] = "https://www.youtube.com/"
-		headers["Origin"] = "https://www.youtube.com"
-	case strings.Contains(lowerURL, "facebook.com") || strings.Contains(lowerURL, "fbcdn.net"):
-		headers["Referer"] = "https://www.facebook.com/"
-	case strings.Contains(lowerURL, "instagram.com") || strings.Contains(lowerURL, "cdninstagram.com"):
-		headers["Referer"] = "https://www.instagram.com/"
-	case strings.Contains(lowerURL, "twitter.com") || strings.Contains(lowerURL, "x.com") || strings.Contains(lowerURL, "twimg.com"):
-		headers["Referer"] = "https://x.com/"
-		headers["Origin"] = "https://x.com"
-	case strings.Contains(lowerURL, "pixiv.net") || strings.Contains(lowerURL, "pximg.net"):
-		headers["Referer"] = "https://www.pixiv.net/"
-	case strings.Contains(lowerURL, "tiktok.com") || strings.Contains(lowerURL, "tiktokcdn.com") || strings.Contains(lowerURL, "byteoversea.com"):
-		headers["Referer"] = "https://www.tiktok.com/"
-		headers["Origin"] = "https://www.tiktok.com"
+	if referer, origin := deriveUpstreamOriginAndReferer(targetURL); referer != "" {
+		headers["Referer"] = referer
+		if origin != "" {
+			headers["Origin"] = origin
+		}
 	}
 
 	return headers
@@ -294,11 +375,19 @@ func buildMergeHeaders(targetURL, requestID string) map[string]string {
 
 func ensureFileExtension(filename, format string) string {
 	filename = strings.TrimSpace(filename)
+	filename = sanitizeUnsafeFilename(filename)
+	filename = normalizeDownAriaTag(filename)
 	if filename == "" {
 		return "downaria_output." + format
 	}
 
 	ext := filepath.Ext(filename)
+	if ext != "" {
+		normalizedCandidate := strings.ToLower(strings.TrimPrefix(ext, "."))
+		if !filenameExtAllowedRe.MatchString(normalizedCandidate) {
+			ext = ""
+		}
+	}
 	if ext != "" {
 		normalizedExt := strings.ToLower(strings.TrimPrefix(ext, "."))
 		normalizedFormat := strings.ToLower(strings.TrimSpace(format))
@@ -318,6 +407,7 @@ func ensureFileExtension(filename, format string) string {
 	}
 
 	filename = stripDownloadLabelSuffix(filename)
+	filename = normalizeDownAriaTag(filename)
 	if filename == "" {
 		filename = "downaria_output"
 	}
@@ -327,6 +417,38 @@ func ensureFileExtension(filename, format string) string {
 	}
 
 	return filename + "." + format
+}
+
+var filenameUnsafeRe = regexp.MustCompile(`[^A-Za-z0-9 _\.\-\[\]\(\)]`)
+var filenameUrlNoiseRe = regexp.MustCompile(`(?i)https?://\S+|www\.\S+`)
+var filenameSpaceRe = regexp.MustCompile(`\s+`)
+var filenameUnderscoreRe = regexp.MustCompile(`_+`)
+var downAriaTagRe = regexp.MustCompile(`(?i)\[downaria\]?`)
+var filenameExtAllowedRe = regexp.MustCompile(`^[a-z0-9]{2,8}$`)
+
+func sanitizeUnsafeFilename(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return ""
+	}
+
+	v = filenameUrlNoiseRe.ReplaceAllString(v, " ")
+	v = filenameUnsafeRe.ReplaceAllString(v, "")
+	v = filenameSpaceRe.ReplaceAllString(v, " ")
+	v = filenameUnderscoreRe.ReplaceAllString(v, "_")
+	v = strings.TrimSpace(v)
+	v = strings.Trim(v, " ._-")
+	return v
+}
+
+func normalizeDownAriaTag(v string) string {
+	if v == "" {
+		return ""
+	}
+	if strings.Contains(strings.ToLower(v), "[downaria") {
+		v = downAriaTagRe.ReplaceAllString(v, "[DownAria]")
+	}
+	return v
 }
 
 func stripDownloadLabelSuffix(filename string) string {
@@ -339,7 +461,8 @@ func stripDownloadLabelSuffix(filename string) string {
 		v = next
 	}
 
-	v = strings.Trim(v, " ._-()[]")
+	// Keep square brackets to preserve branded suffix like "[DownAria]".
+	v = strings.Trim(v, " ._-")
 	return strings.TrimSpace(v)
 }
 

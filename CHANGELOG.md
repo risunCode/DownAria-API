@@ -3,6 +3,32 @@
 All notable changes to **DownAria-API** are documented in this file.
 This format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.1.0] - 2026-03-03
+
+### Added
+- Unified URL sanitizer utility for strict HTTP/HTTPS canonicalization in outbound paths.
+- Shared log-redaction utility for sensitive token/query/header masking in high-risk logs.
+- MIME-first media classifier for Aria-Extended normalization (MIME -> extension -> codec fallback).
+- Singleflight dedupe for extraction cache misses and proxy HEAD metadata fetches.
+
+### Changed
+- Extraction flow now supports generic fallback for non-native unknown URLs via Aria-Extended, while preserving native-first exception behavior.
+- Proxy limits are now mode-aware: download path constrained to configured download cap, preview/proxy path supports larger safe ceiling.
+- Filename generation strategy upgraded across extractors with safer sanitization and improved identifier composition.
+- Route-level rate-limiting tightened with stricter controls for expensive merge paths.
+
+### Security
+- Applied request-body cap and `413` handling in web-signature middleware.
+- Enforced merge exposure controls via config gating and protected route behavior.
+- Added redirect-aware outbound SSRF guards and stricter outbound host validation.
+- Strengthened command execution safety with bounded output capture and explicit timeout controls.
+
+### Fixed
+- Reduced false media-type detection by unifying variant/top-level classification logic.
+- Fixed malformed filename edge cases (mojibake noise, missing `[DownAria]` closing bracket) in merge/download paths.
+- Removed expensive full-stream size probing fallback in favor of bounded range probing.
+- Added direct `videoUrl+audioUrl` merge-path support for non-YouTube stream pair merge requests.
+
 ## [1.0.0] - 2026-03-03
 
 Initial unified production release of DownAria-API.
@@ -37,4 +63,3 @@ Initial unified production release of DownAria-API.
 - Improved response streaming error handling paths for merge/proxy stability.
 
 ---
-DownAria-API `v1.0.0` is the baseline release line going forward.

@@ -15,6 +15,7 @@ func NewRouter(h *handlers.Handler, cfg config.Config) http.Handler {
 	originProtected := middleware.RequireOrigin(cfg.AllowedOrigins)
 	antiBot := middleware.BlockBotAccess()
 	webSignature := middleware.RequireWebSignature(cfg.WebInternalSharedSecret)
+	mergeEnabled := middleware.RequireMergeEnabled(cfg.MergeEnabled)
 	r := chi.NewRouter()
 
 	r.NotFound(func(w http.ResponseWriter, req *http.Request) {
@@ -36,13 +37,17 @@ func NewRouter(h *handlers.Handler, cfg config.Config) http.Handler {
 		web.Use(webSignature)
 		web.Post("/extract", h.Extract)
 		web.Get("/proxy", h.Proxy)
-		web.Post("/merge", h.Merge)
+		web.Get("/download", h.Download)
+		web.With(mergeEnabled).Post("/merge", h.Merge)
 	})
 
 	r.Route("/api/v1", func(v1 chi.Router) {
 		v1.Post("/extract", h.Extract)
 		v1.Get("/proxy", h.Proxy)
-		v1.Post("/merge", h.Merge)
+		v1.Get("/download", h.Download)
+		if cfg.WebInternalSharedSecret == "" {
+			v1.With(mergeEnabled).Post("/merge", h.Merge)
+		}
 	})
 
 	return r

@@ -68,6 +68,14 @@ func TestEnsureFileExtension(t *testing.T) {
 	if got := ensureFileExtension("HD", "mp4"); got != "downaria_output.mp4" {
 		t.Fatalf("fallback filename mismatch after stripping labels: %s", got)
 	}
+
+	if got := ensureFileExtension("clip_[DownAria].mp4", "mp4"); got != "clip_[DownAria].mp4" {
+		t.Fatalf("branded suffix should be preserved: %s", got)
+	}
+
+	if got := ensureFileExtension("Ã¨ÂµÂ¤Ã©Â_Â_jo._Ã¦Â±Â_Ã¦Â±Â_Ã¯Â½Â__126715010_[DownAria", "mp4"); got != "jo._126715010_[DownAria].mp4" {
+		t.Fatalf("mojibake filename should be sanitized and tag normalized: %s", got)
+	}
 }
 
 func TestBuildYTDLPFormatSelectorPrefersAVC1(t *testing.T) {

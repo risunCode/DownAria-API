@@ -4,7 +4,20 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 )
+
+var (
+	filenameURLRe        = regexp.MustCompile(`(?i)https?://\S+|www\.\S+`)
+	filenameSpaceRe      = regexp.MustCompile(`\s+`)
+	filenamePunctRe      = regexp.MustCompile(`[\[\]\(\){}<>:"'/\\|?*~` + "`" + `,;+=!$%^&@#]`)
+	filenameAllowedRe    = regexp.MustCompile(`[^a-z0-9 _-]`)
+	filenameUnderscoreRe = regexp.MustCompile(`_+`)
+	extAllowedRe         = regexp.MustCompile(`^[a-z0-9]{2,8}$`)
+	filenameNowFunc      = time.Now
+)
+
+const maxFilenameTitleWords = 15
 
 // GenerateFilename creates a standardized filename: author_title_id_[DownAria].ext
 // Format: {author}_{title}_{id}_[DownAria].{extension}
@@ -15,29 +28,60 @@ func GenerateFilename(author, title, contentID, extension string) string {
 		author = "unknown"
 	}
 
-	// Sanitize title
+	// Sanitize title (optional)
 	title = sanitizeFilenameComponent(title)
-	if title == "" {
-		title = "untitled"
-	}
+	title = capFilenameTitleWords(title, maxFilenameTitleWords)
 
 	// Sanitize content ID (optional)
 	contentID = sanitizeFilenameComponent(contentID)
 
-	// Build filename: author_title_id_[DownAria].ext
-	var filename string
-	if contentID != "" {
-		filename = fmt.Sprintf("%s_%s_%s_[DownAria].%s", author, title, contentID, extension)
-	} else {
-		filename = fmt.Sprintf("%s_%s_[DownAria].%s", author, title, extension)
-	}
+	// Sanitize extension
+	extension = sanitizeExtension(extension)
 
-	// Ensure total length doesn't exceed 250 chars (filesystem safe limit)
-	if len(filename) > 250 {
-		filename = truncateFilename(filename, 250)
+	// Build filename: author[_title][_id]_[DownAria].ext
+	parts := []string{author}
+	if title != "" {
+		parts = append(parts, title)
+	}
+	if contentID != "" {
+		parts = append(parts, contentID)
+	}
+	filename := fmt.Sprintf("%s_[DownAria].%s", strings.Join(parts, "_"), extension)
+
+	// Ensure total length doesn't exceed 220 chars (safer across environments)
+	if len(filename) > 220 {
+		filename = truncateFilename(filename, 220)
 	}
 
 	return filename
+}
+
+// BuildFilenameID creates stable identifier segment.
+// Preferred format:
+//   - authorID_postID (when both exist)
+//   - authorID_YYYYMMDDHHMMSS (when only authorID exists)
+//   - postID (when only postID exists)
+//   - YYYYMMDDHHMMSS (fallback)
+func BuildFilenameID(authorID, postID string) string {
+	aid := sanitizeFilenameComponent(authorID)
+	pid := sanitizeFilenameComponent(postID)
+	ts := filenameNowFunc().UTC().Format("20060102150405")
+
+	switch {
+	case aid != "" && pid != "":
+		return aid + "_" + pid
+	case aid != "":
+		return aid + "_" + ts
+	case pid != "":
+		return pid
+	default:
+		return ts
+	}
+}
+
+// GenerateFilenameWithMeta builds filename using author/title and ID strategy.
+func GenerateFilenameWithMeta(author, title, authorID, postID, extension string) string {
+	return GenerateFilename(author, title, BuildFilenameID(authorID, postID), extension)
 }
 
 // sanitizeFilenameComponent removes/replaces invalid filename characters
@@ -49,24 +93,67 @@ func sanitizeFilenameComponent(s string) string {
 	// Convert to lowercase and trim spaces
 	s = strings.ToLower(strings.TrimSpace(s))
 
+	// Remove URLs first (very noisy in captions)
+	s = filenameURLRe.ReplaceAllString(s, " ")
+
+	// Normalize common separators to spaces
+	s = filenamePunctRe.ReplaceAllString(s, " ")
+
+	// Keep only safe ascii symbols (drop emoji/unsupported unicode/mojibake)
+	s = filenameAllowedRe.ReplaceAllString(s, "")
+
 	// Replace multiple spaces with single space
-	s = regexp.MustCompile(`\s+`).ReplaceAllString(s, " ")
+	s = filenameSpaceRe.ReplaceAllString(s, " ")
 
 	// Replace spaces with underscores
 	s = strings.ReplaceAll(s, " ", "_")
 
-	// Remove invalid filename characters: < > : " / \ | ? *
-	// Also remove emoji and special unicode
-	invalidChars := regexp.MustCompile(`[<>:"/\\|?*]`)
-	s = invalidChars.ReplaceAllString(s, "")
-
 	// Remove consecutive underscores
-	s = regexp.MustCompile(`_+`).ReplaceAllString(s, "_")
+	s = filenameUnderscoreRe.ReplaceAllString(s, "_")
 
 	// Remove leading/trailing underscores
 	s = strings.Trim(s, "_")
 
+	// Keep components reasonably short
+	if len(s) > 80 {
+		s = strings.Trim(strings.TrimSpace(s[:80]), "_")
+	}
+
 	return s
+}
+
+func sanitizeExtension(ext string) string {
+	ext = strings.ToLower(strings.TrimSpace(ext))
+	ext = strings.TrimPrefix(ext, ".")
+	if !extAllowedRe.MatchString(ext) {
+		return "bin"
+	}
+	return ext
+}
+
+func capFilenameTitleWords(v string, maxWords int) string {
+	if v == "" || maxWords <= 0 {
+		return ""
+	}
+
+	parts := strings.Split(v, "_")
+	trimmed := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		trimmed = append(trimmed, p)
+		if len(trimmed) >= maxWords {
+			break
+		}
+	}
+
+	if len(trimmed) == 0 {
+		return ""
+	}
+
+	return strings.Join(trimmed, "_")
 }
 
 // truncateFilename safely truncates filename while preserving extension

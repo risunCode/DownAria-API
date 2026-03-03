@@ -53,18 +53,22 @@ Core endpoints are exposed under two prefixes with the same handlers.
 
 - `POST /api/web/extract`
 - `GET /api/web/proxy`
+- `GET /api/web/download`
 - `POST /api/web/merge`
 
 Additional middleware on this group:
 
 - Origin check (`RequireOrigin`)
 - Anti-bot filter (`BlockBotAccess`)
+- Web signature verification (`RequireWebSignature` using `X-Downaria-Timestamp`, `X-Downaria-Nonce`, `X-Downaria-Signature`)
+- Merge route is additionally gated by `MERGE_ENABLED` (`RequireMergeEnabled`)
 
 ### `/api/v1/*` (public API)
 
 - `POST /api/v1/extract`
 - `GET /api/v1/proxy`
-- `POST /api/v1/merge`
+- `GET /api/v1/download`
+- `POST /api/v1/merge` (registered only when `WEB_INTERNAL_SHARED_SECRET` is empty)
 
 The `/api/v1/*` group does not apply origin-protection or anti-bot middleware.
 
@@ -76,7 +80,7 @@ The `/api/v1/*` group does not apply origin-protection or anti-bot middleware.
 
 - Request JSON: `{ "url": "...", "cookie": "optional" }`
 - Validates `http/https` URL, selects extractor through the registry, executes extraction, and records extraction metrics.
-- Success response includes `platform` and `result`.
+- Success response returns the extracted payload in `data` (no nested `result`).
 
 ### `GET /api/web/proxy` and `GET /api/v1/proxy`
 
@@ -84,15 +88,29 @@ The `/api/v1/*` group does not apply origin-protection or anti-bot middleware.
 - Optional query: `head=1`, `download=1`
 - Supports forwarding `Range` for stream/seek.
 - `head=1` returns header metadata (`X-File-Size`, `Content-Type`) without a body.
-- Enforces file size limits using `MAX_DOWNLOAD_SIZE_MB`.
+- File size behavior is mode-aware:
+  - Preview/proxy mode (`download=0`): capped at 10 GB (`maxProxyPreviewSizeMB`)
+  - Download mode (`download=1`): capped by `MAX_DOWNLOAD_SIZE_MB`
+
+### `GET /api/web/download` and `GET /api/v1/download`
+
+- Same handler as proxy endpoint but forced download mode.
+- Equivalent to proxy request with `download=1`.
+- Applies `MAX_DOWNLOAD_SIZE_MB` cap and sets attachment-oriented `Content-Disposition`.
 
 ### `POST /api/web/merge` and `POST /api/v1/merge`
 
-- Request JSON: `{ "url": "YOUTUBE_URL", "quality": "optional", "format": "optional", "filename": "optional", "userAgent": "optional" }`
-- Uses strict fast-path resolution with `yt-dlp` and FFmpeg only (no manual `videoUrl`/`audioUrl` fallback path).
-- Supports:
-  - video merge output (`mp4` stream)
-  - audio extraction output (`mp3` or `m4a` stream)
+- Base request JSON fields: `url`, `videoUrl`, `audioUrl`, `quality`, `format`, `filename`, `userAgent`, `platform`.
+- Supports three request modes:
+  - YouTube URL fast-path (`url` with YouTube host): resolves separate streams via `yt-dlp`, then merges via FFmpeg.
+  - Direct pair merge (`videoUrl` + `audioUrl` together): merges non-YouTube stream pairs directly via FFmpeg.
+  - Audio-only conversion (`format=m4a|mp3` or matching `quality`): extracts audio stream and returns `m4a` or `mp3`.
+- Validation rules:
+  - `videoUrl` and `audioUrl` must be provided together.
+  - If direct pair is not used, `url` is required.
+  - Non-YouTube `url` is only accepted for audio-only conversion.
+- Response is a binary attachment stream.
+- Merge output size is capped by `MAX_MERGE_OUTPUT_SIZE_MB`.
 - Response includes `Content-Disposition: attachment` with resolved output filename.
 
 Examples:
@@ -107,6 +125,11 @@ curl -X POST "http://localhost:8080/api/v1/merge" \
 curl -X POST "http://localhost:8080/api/v1/merge" \
   -H "Content-Type: application/json" \
   -d '{"url":"https://www.youtube.com/watch?v=dQw4w9WgXcQ","format":"m4a","filename":"track.m4a"}'
+
+# Direct pair merge (non-YouTube streams)
+curl -X POST "http://localhost:8080/api/v1/merge" \
+  -H "Content-Type: application/json" \
+  -d '{"videoUrl":"https://cdn.example.com/video.m3u8","audioUrl":"https://cdn.example.com/audio.m3u8","filename":"clip.mp4"}'
 ```
 
 ---
@@ -115,3 +138,9 @@ curl -X POST "http://localhost:8080/api/v1/merge" \
 
 - `GET /api/v1/status` is not present in the current router.
 - Legacy documentation that references that status endpoint is no longer valid.
+
+## 5) Route registration and production posture
+
+- Router behavior is controlled by `internal/transport/http/router.go`.
+- `POST /api/v1/merge` is intentionally not registered when `WEB_INTERNAL_SHARED_SECRET` is configured.
+- `cmd/server/main.go` currently requires `WEB_INTERNAL_SHARED_SECRET`, so production deployments should use signed `/api/web/merge`.
