@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 
 	"downaria-api/internal/extractors/core"
@@ -133,17 +134,34 @@ func (e *TwitterExtractor) Extract(urlStr string, opts core.ExtractOptions) (*co
 		media := core.NewMedia(i, core.MediaTypeImage, m.MediaURLHTTPS)
 		if m.Type == "video" || m.Type == "animated_gif" {
 			media.Type = core.MediaTypeVideo
-			// Find best quality
-			var bestURL string
-			var bestBitrate int
+
+			// Collect all MP4 variants with bitrate info
+			type variantInfo struct {
+				Bitrate int
+				URL     string
+			}
+			var variants []variantInfo
+
 			for _, v := range m.VideoInfo.Variants {
-				if strings.Contains(v.URL, ".mp4") && v.Bitrate > bestBitrate {
-					bestBitrate = v.Bitrate
-					bestURL = v.URL
+				if strings.Contains(v.URL, ".mp4") {
+					variants = append(variants, variantInfo{
+						Bitrate: v.Bitrate,
+						URL:     v.URL,
+					})
 				}
 			}
-			if bestURL != "" {
-				variant := core.NewVideoVariant(fmt.Sprintf("%d kbps", bestBitrate/1000), bestURL)
+
+			// Sort by bitrate descending (highest quality first)
+			sort.Slice(variants, func(i, j int) bool {
+				return variants[i].Bitrate > variants[j].Bitrate
+			})
+
+			// Create variant for each quality
+			for _, v := range variants {
+				quality := getQualityLabel(v.Bitrate)
+				variant := core.NewVideoVariant(quality, v.URL).
+					WithBitrate(v.Bitrate)
+
 				filename := core.GenerateFilename(data.User.ScreenName, pickFirstNonEmpty(data.FullText, data.Text), tweetID, "mp4")
 				variant = variant.WithFilename(filename)
 				core.AddVariant(&media, variant)
@@ -261,4 +279,26 @@ func pickFirstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// getQualityLabel converts bitrate (in bps) to user-friendly quality label
+func getQualityLabel(bitrate int) string {
+	bitrateMbps := bitrate / 1_000_000
+
+	switch {
+	case bitrateMbps >= 15:
+		return "4K"
+	case bitrateMbps >= 8:
+		return "1440p"
+	case bitrateMbps >= 5:
+		return "1080p"
+	case bitrateMbps >= 2:
+		return "720p"
+	case bitrateMbps >= 1:
+		return "480p"
+	case bitrateMbps >= 500/1000: // 500 kbps
+		return "360p"
+	default:
+		return fmt.Sprintf("%d kbps", bitrate/1000)
+	}
 }
