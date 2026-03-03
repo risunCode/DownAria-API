@@ -144,10 +144,14 @@ func (e *TwitterExtractor) Extract(urlStr string, opts core.ExtractOptions) (*co
 			}
 			if bestURL != "" {
 				variant := core.NewVideoVariant(fmt.Sprintf("%d kbps", bestBitrate/1000), bestURL)
+				filename := core.GenerateFilename(data.User.ScreenName, pickFirstNonEmpty(data.FullText, data.Text), tweetID, "mp4")
+				variant = variant.WithFilename(filename)
 				core.AddVariant(&media, variant)
 			}
 		} else {
 			variant := core.NewImageVariant("Original", m.MediaURLHTTPS)
+			filename := core.GenerateFilename(data.User.ScreenName, pickFirstNonEmpty(data.FullText, data.Text), tweetID, "jpg")
+			variant = variant.WithFilename(filename)
 			core.AddVariant(&media, variant)
 		}
 		builder.AddMedia(media)

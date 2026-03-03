@@ -99,12 +99,16 @@ func (e *PixivExtractor) Extract(urlStr string, opts core.ExtractOptions) (*core
 			pageURL := strings.Replace(originalURL, "_p0", fmt.Sprintf("_p%d", i), 1)
 			media := core.NewMedia(i, core.MediaTypeImage, "")
 			variant := core.NewImageProxyVariant("Original", pageURL)
+			filename := core.GenerateFilename(data.Body.UserName, data.Body.IllustTitle, id, "jpg")
+			variant = variant.WithFilename(filename)
 			core.AddVariant(&media, variant)
 			builder.AddMedia(media)
 		}
 	} else {
 		media := core.NewMedia(0, core.MediaTypeImage, "")
 		variant := core.NewImageProxyVariant("Original", originalURL)
+		filename := core.GenerateFilename(data.Body.UserName, data.Body.IllustTitle, id, "jpg")
+		variant = variant.WithFilename(filename)
 		core.AddVariant(&media, variant)
 		builder.AddMedia(media)
 	}

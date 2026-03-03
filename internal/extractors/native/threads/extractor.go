@@ -149,6 +149,8 @@ func (e *ThreadsExtractor) Extract(urlStr string, opts core.ExtractOptions) (*co
 	for _, mediaURL := range videos {
 		media := core.NewMedia(idx, core.MediaTypeVideo, thumbnail)
 		variant := core.NewVideoVariant("HD", mediaURL)
+		filename := core.GenerateFilename(handle, pickFirstNonEmpty(title, description), postID, "mp4")
+		variant = variant.WithFilename(filename)
 		if size := e.probeContentLength(mediaURL, opts, selectedHeaders); size > 0 {
 			variant = variant.WithSize(size)
 		}
@@ -159,6 +161,8 @@ func (e *ThreadsExtractor) Extract(urlStr string, opts core.ExtractOptions) (*co
 	for _, mediaURL := range images {
 		media := core.NewMedia(idx, core.MediaTypeImage, mediaURL)
 		variant := core.NewImageVariant("Original", mediaURL)
+		filename := core.GenerateFilename(handle, pickFirstNonEmpty(title, description), postID, "jpg")
+		variant = variant.WithFilename(filename)
 		if size := e.probeContentLength(mediaURL, opts, selectedHeaders); size > 0 {
 			variant = variant.WithSize(size)
 		}

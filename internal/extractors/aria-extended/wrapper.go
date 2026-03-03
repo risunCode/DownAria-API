@@ -138,6 +138,14 @@ func (e *PythonExtractor) Extract(urlStr string, opts core.ExtractOptions) (*cor
 		variant = variant.WithMerge(f.VCodec != "" && f.VCodec != "none" && (f.ACodec == "" || f.ACodec == "none"))
 		variant = variant.WithFormatID(f.FormatID)
 
+		// Generate filename: author_title_id_[DownAria].ext
+		extension := f.Ext
+		if extension == "" {
+			extension = core.GetExtensionFromMime("")
+		}
+		filename := core.GenerateFilename(meta.Uploader, meta.Title, meta.ID, extension)
+		variant = variant.WithFilename(filename)
+
 		core.AddVariant(&media, variant)
 	}
 

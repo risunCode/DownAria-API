@@ -179,3 +179,9 @@ func (v Variant) WithBitrate(bitrate int) Variant {
 	v.Bitrate = bitrate
 	return v
 }
+
+// WithFilename sets suggested filename
+func (v Variant) WithFilename(filename string) Variant {
+	v.Filename = filename
+	return v
+}

@@ -126,6 +126,12 @@ func (e *FacebookExtractor) Extract(urlStr string, opts core.ExtractOptions) (*c
 		if isImage {
 			variant = core.NewImageVariant(f.Quality, f.URL)
 		}
+		ext := "mp4"
+		if isImage {
+			ext = "jpg"
+		}
+		filename := core.GenerateFilename(metadata.Author, metadata.Title, "", ext)
+		variant = variant.WithFilename(filename)
 		core.AddVariant(&media, variant)
 	}
 	builder.AddMedia(media)
