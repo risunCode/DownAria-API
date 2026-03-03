@@ -50,15 +50,33 @@ func (h *Handler) buildStatusPayload() map[string]any {
 		},
 		"memory": map[string]any{
 			"totalBytes":         totalRAM,
+			"total":              formatBytesAuto(totalRAM),
 			"availableBytes":     availableRAM,
+			"available":          formatBytesAuto(availableRAM),
 			"processAllocBytes":  mem.Alloc,
+			"processAlloc":       formatBytesAuto(mem.Alloc),
 			"processSystemBytes": mem.Sys,
+			"processSystem":      formatBytesAuto(mem.Sys),
 		},
 		"storage": map[string]any{
 			"root": rootDisk,
 			"temp": tempDisk,
 		},
 	}
+}
+
+func formatBytesAuto[T ~uint64 | ~uint](v T) string {
+	bytes := float64(v)
+	units := []string{"B", "KB", "MB", "GB", "TB", "PB"}
+	idx := 0
+	for bytes >= 1024 && idx < len(units)-1 {
+		bytes /= 1024
+		idx++
+	}
+	if idx == 0 {
+		return strconv.FormatUint(uint64(v), 10) + " " + units[idx]
+	}
+	return strconv.FormatFloat(bytes, 'f', 2, 64) + " " + units[idx]
 }
 
 func formatUptime(d time.Duration) string {
@@ -145,7 +163,10 @@ func readDiskUsage(path string) map[string]any {
 	}
 
 	result["totalBytes"] = totalKB * 1024
+	result["total"] = formatBytesAuto(totalKB * 1024)
 	result["usedBytes"] = usedKB * 1024
+	result["used"] = formatBytesAuto(usedKB * 1024)
 	result["freeBytes"] = freeKB * 1024
+	result["free"] = formatBytesAuto(freeKB * 1024)
 	return result
 }
