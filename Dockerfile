@@ -13,18 +13,19 @@ COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/downaria-api ./cmd/server
 
-FROM debian:bookworm-slim
+FROM alpine:3.19
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apk add --no-cache \
   ca-certificates \
   tzdata \
   ffmpeg \
+  python3 \
+  py3-pip \
   curl \
-  && curl -fsSL "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp" -o /usr/local/bin/yt-dlp \
-  && chmod 0755 /usr/local/bin/yt-dlp \
-  && rm -rf /var/lib/apt/lists/*
+  && pip3 install --no-cache-dir --break-system-packages yt-dlp \
+  && rm -rf /var/cache/apk/*
 
 COPY --from=builder /out/downaria-api /app/downaria-api
 

@@ -49,14 +49,14 @@ func (h *Handler) buildStatusPayload() map[string]any {
 			"cpuCores":  runtime.NumCPU(),
 		},
 		"memory": map[string]any{
-			"totalBytes":         totalRAM,
 			"total":              formatBytesAuto(totalRAM),
-			"availableBytes":     availableRAM,
+			"totalBytes":         totalRAM,
 			"available":          formatBytesAuto(availableRAM),
-			"processAllocBytes":  mem.Alloc,
+			"availableBytes":     availableRAM,
 			"processAlloc":       formatBytesAuto(mem.Alloc),
-			"processSystemBytes": mem.Sys,
+			"processAllocBytes":  mem.Alloc,
 			"processSystem":      formatBytesAuto(mem.Sys),
+			"processSystemBytes": mem.Sys,
 		},
 		"storage": map[string]any{
 			"root": rootDisk,
@@ -135,8 +135,11 @@ func parseMemInfoLine(line string) uint64 {
 func readDiskUsage(path string) map[string]any {
 	result := map[string]any{
 		"path":       path,
+		"total":      "0 B",
 		"totalBytes": uint64(0),
+		"used":       "0 B",
 		"usedBytes":  uint64(0),
+		"free":       "0 B",
 		"freeBytes":  uint64(0),
 	}
 
@@ -162,11 +165,15 @@ func readDiskUsage(path string) map[string]any {
 		return result
 	}
 
-	result["totalBytes"] = totalKB * 1024
-	result["total"] = formatBytesAuto(totalKB * 1024)
-	result["usedBytes"] = usedKB * 1024
-	result["used"] = formatBytesAuto(usedKB * 1024)
-	result["freeBytes"] = freeKB * 1024
-	result["free"] = formatBytesAuto(freeKB * 1024)
+	totalBytes := totalKB * 1024
+	usedBytes := usedKB * 1024
+	freeBytes := freeKB * 1024
+
+	result["total"] = formatBytesAuto(totalBytes)
+	result["totalBytes"] = totalBytes
+	result["used"] = formatBytesAuto(usedBytes)
+	result["usedBytes"] = usedBytes
+	result["free"] = formatBytesAuto(freeBytes)
+	result["freeBytes"] = freeBytes
 	return result
 }
