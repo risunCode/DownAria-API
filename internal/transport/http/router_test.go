@@ -36,6 +36,30 @@ func TestRouter_HealthEndpoint(t *testing.T) {
 	}
 }
 
+func TestRouter_RootEndpoint(t *testing.T) {
+	cfg := config.Config{}
+	h := handlers.NewHandler(cfg, time.Now())
+	router := NewRouter(h, cfg)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	var response map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if response["success"] != true {
+		t.Error("expected success to be true")
+	}
+}
+
 func TestRouter_NotFound(t *testing.T) {
 	cfg := config.Config{}
 	h := handlers.NewHandler(cfg, time.Now())

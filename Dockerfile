@@ -13,11 +13,17 @@ COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/downaria-api ./cmd/server
 
-FROM alpine:3.20
+FROM debian:bookworm-slim
 
 WORKDIR /app
 
-RUN apk add --no-cache ca-certificates tzdata ffmpeg yt-dlp
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  ca-certificates \
+  tzdata \
+  ffmpeg \
+  yt-dlp \
+  curl \
+  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /out/downaria-api /app/downaria-api
 
@@ -26,6 +32,6 @@ ENV PORT=8081
 EXPOSE 8081
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:${PORT}/health || exit 1
+  CMD curl -fsS http://127.0.0.1:${PORT}/health || exit 1
 
 CMD ["/app/downaria-api"]

@@ -25,6 +25,7 @@ func NewRouter(h *handlers.Handler, cfg config.Config) http.Handler {
 		response.WriteErrorRequest(w, req, apperrors.HTTPStatus(apperrors.CodeMethodNotAllowed), apperrors.CodeMethodNotAllowed, "method not allowed on this path")
 	})
 
+	r.Get("/", h.Root)
 	r.Get("/health", h.Health)
 	r.Get("/api/settings", h.Settings)
 	r.Get("/api/v1/stats/public", h.PublicStats)
