@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 This is a monorepo containing **DownAria** - a media extraction and download platform with two main components:
 
 - **DownAria2** (frontend): Next.js 16 app with TypeScript, Tailwind CSS 4
-- **FetchMoona** (backend): Go 1.24 API with clean architecture
+- **DownAria-API** (backend): Go 1.24 API with clean architecture
 
 **Supported Platforms:**
 - YouTube (via yt-dlp wrapper)
@@ -37,7 +37,7 @@ dev.cmd
 
 # Manual start (from root):
 # Terminal 1 - Backend (with live reload)
-cd FetchMoona && go run github.com/air-verse/air@latest -c .air.toml
+cd DownAria-API && go run github.com/air-verse/air@latest -c .air.toml
 
 # Terminal 2 - Frontend
 cd DownAria2 && npm run dev
@@ -68,17 +68,17 @@ npm run test             # Run Vitest tests
 # - Copies root CHANGELOG.md to public/Changelog.md
 ```
 
-### FetchMoona (Backend)
+### DownAria-API (Backend)
 
 ```bash
-cd FetchMoona
+cd DownAria-API
 
 # Development
 go run ./cmd/server                                    # Run server directly
 go run github.com/air-verse/air@latest -c .air.toml   # Run with live reload
 
 # Building
-go build -o fetchmoona ./cmd/server    # Build binary
+go build -o downaria-api ./cmd/server    # Build binary
 
 # Testing
 go test ./...                          # Run all tests
@@ -156,7 +156,7 @@ src/
 - Separate stricter limits for merge routes (1/3 of global limit)
 - Trusted proxy CIDR support for accurate client IP extraction
 
-### FetchMoona Structure
+### DownAria-API Structure
 
 Clean architecture with clear layer boundaries:
 
@@ -237,7 +237,7 @@ Both services require `.env.local` or `.env` files. See `.env.example` in each d
 **Backend:**
 - Uses Go's built-in testing framework
 - Test files: `*_test.go` (28 test files)
-- Run: `go test ./...` in FetchMoona directory
+- Run: `go test ./...` in DownAria-API directory
 - Integration tests in `internal/extractors/extractor_integration_test.go`
 
 ## Important Conventions
@@ -301,13 +301,13 @@ When adding or modifying platform extractors:
 ### Docker (Backend)
 
 ```bash
-cd FetchMoona
+cd DownAria-API
 
 # Build image
-docker build -t fetchmoona:latest .
+docker build -t downaria-api:latest .
 
 # Run container
-docker run --rm -p 8080:8080 --env-file .env fetchmoona:latest
+docker run --rm -p 8080:8080 --env-file .env downaria-api:latest
 ```
 
 **Requirements:**
@@ -319,10 +319,10 @@ docker run --rm -p 8080:8080 --env-file .env fetchmoona:latest
 ### Railway
 
 Both projects include deployment configurations:
-- **FetchMoona**: `railway.toml` for Dockerfile deployment
-- **DownAria2**: Standard Next.js deployment
+- **DownAria-API**: `railway.toml` for Dockerfile deployment
+- **DownAria**: Standard Next.js deployment
 
-See `FetchMoona/Documentation/DEPLOYMENT.md` for production environment recommendations.
+See `DownAria-API/Documentation/DEPLOYMENT.md` for production environment recommendations.
 
 ### Vercel (Frontend)
 
@@ -331,20 +331,20 @@ See `FetchMoona/Documentation/DEPLOYMENT.md` for production environment recommen
 
 ## Dependencies
 
-**Backend (FetchMoona):**
+**Backend (DownAria-API):**
 - Go 1.24+
 - **FFmpeg** (required for `/api/web/merge` and `/api/v1/merge` routes)
 - yt-dlp (for YouTube extraction)
 
-**Frontend (DownAria2):**
+**Frontend (DownAria):**
 - Node.js (compatible with Next.js 16)
 - npm
 
 ## Documentation
 
 Additional documentation in each project:
-- **DownAria2/Documentation/**: API_Routes.md, Architecture.md, Env_Variables.md
-- **FetchMoona/Documentation/**: API_Routes.md, Architecture.md, ERROR_CODES.md, ERROR_HANDLING.md, CONFIGURATION.md, DEPLOYMENT.md
+- **DownAria/Documentation/**: API_Routes.md, Architecture.md, Env_Variables.md
+- **DownAria-API/Documentation/**: API_Routes.md, Architecture.md, ERROR_CODES.md, ERROR_HANDLING.md, CONFIGURATION.md, DEPLOYMENT.md
 
 ## Common Pitfalls
 

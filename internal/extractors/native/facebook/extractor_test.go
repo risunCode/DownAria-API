@@ -77,6 +77,32 @@ func TestExtractFormats_ProgressiveStoryURLs(t *testing.T) {
 	}
 }
 
+func TestExtractFormats_DedupStoryVariantsByQualityAndPath(t *testing.T) {
+	e := NewFacebookExtractor()
+	html := strings.Join([]string{
+		`"progressive_url":"https:\/\/video.cdn.test\/story_hd.mp4?token=a","failure_reason":null,"metadata":{"quality":"HD"}`,
+		`"progressive_url":"https:\/\/video.cdn.test\/story_hd.mp4?token=b","failure_reason":null,"metadata":{"quality":"HD"}`,
+		`"progressive_url":"https:\/\/video.cdn.test\/story_sd.mp4?token=1","failure_reason":null,"metadata":{"quality":"SD"}`,
+		`"progressive_url":"https:\/\/video.cdn.test\/story_sd.mp4?token=2","failure_reason":null,"metadata":{"quality":"SD"}`,
+	}, ",")
+
+	formats := e.extractFormats(html)
+	if len(formats) != 2 {
+		t.Fatalf("expected 2 deduplicated variants (HD+SD), got %d", len(formats))
+	}
+
+	if formats[0].Quality != "HD" || formats[1].Quality != "SD" {
+		t.Fatalf("expected HD then SD qualities, got %q and %q", formats[0].Quality, formats[1].Quality)
+	}
+
+	if formats[0].URL != "https://video.cdn.test/story_hd.mp4?token=a" {
+		t.Fatalf("expected first HD URL to be kept, got %q", formats[0].URL)
+	}
+	if formats[1].URL != "https://video.cdn.test/story_sd.mp4?token=1" {
+		t.Fatalf("expected first SD URL to be kept, got %q", formats[1].URL)
+	}
+}
+
 func TestCheckLoginRequired_DoesNotFailWhenProgressiveMediaPresent(t *testing.T) {
 	e := NewFacebookExtractor()
 	html := `<html><body>login.php "progressive_url":"https:\/\/video.cdn.test\/story_sd.mp4"</body></html>`
@@ -113,6 +139,16 @@ func TestExtractMetadata_StoryCapturesCreationTimestamp(t *testing.T) {
 	m := e.extractMetadata(html, "https://www.facebook.com/stories/jane/123456789")
 	if m.CreatedAt != "2024-03-04T02:08:43Z" {
 		t.Fatalf("expected normalized createdAt from creation_time, got %q", m.CreatedAt)
+	}
+}
+
+func TestExtractMetadata_StoryThumbnailFallbackFromInlinePayload(t *testing.T) {
+	e := NewFacebookExtractor()
+	html := `<html><body><script>"story_thumbnail":{"uri":"https:\/\/cdn.test\/thumb_story.jpg?_nc_cat=1"}</script></body></html>`
+
+	m := e.extractMetadata(html, "https://www.facebook.com/stories/jane/123456789")
+	if m.Thumbnail != "https://cdn.test/thumb_story.jpg?_nc_cat=1" {
+		t.Fatalf("expected thumbnail fallback from story payload, got %q", m.Thumbnail)
 	}
 }
 

@@ -1,10 +1,10 @@
-# FetchMoona
+# DownAria-API
 
 High-performance Go-based API for extracting media from social platforms with a unified response format.
 
 ## Release
 
-- **Current unified release:** `v1.1.0`
+- **Current unified release:** `v1.1.2`
 - **Lineage:** upgraded from the initial `v1.0.0` line with security/performance hardening and unified extraction improvements.
 
 ## Features
@@ -39,7 +39,7 @@ go mod download
 go run ./cmd/server
 
 # Build binary
-go build -o fetchmoona ./cmd/server
+go build -o downaria-api ./cmd/server
 ```
 
 ## API Endpoints
@@ -133,10 +133,10 @@ Extract media from a URL.
 
 ```bash
 # Build image
-docker build -t fetchmoona:latest .
+docker build -t downaria-api:latest .
 
 # Run container
-docker run --rm -p 8080:8080 --env-file .env fetchmoona:latest
+docker run --rm -p 8081:8081 --env-file .env downaria-api:latest
 ```
 
 Healthcheck endpoint: `GET /health`

@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"strings"
 
-	"fetchmoona/internal/infra/network"
-	"fetchmoona/internal/shared/util"
-	"fetchmoona/pkg/response"
+	"downaria-api/internal/infra/network"
+	"downaria-api/internal/shared/util"
+	"downaria-api/pkg/response"
 )
 
 type StreamHandler struct {

@@ -3,7 +3,7 @@ package handlers
 import (
 	"net/http"
 
-	"fetchmoona/pkg/response"
+	"downaria-api/pkg/response"
 )
 
 func (h *Handler) Settings(w http.ResponseWriter, r *http.Request) {

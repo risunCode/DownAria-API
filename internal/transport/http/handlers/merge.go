@@ -16,12 +16,12 @@ import (
 	"strings"
 	"time"
 
-	apperrors "fetchmoona/internal/core/errors"
-	extractorcore "fetchmoona/internal/extractors/core"
-	"fetchmoona/internal/shared/util"
-	"fetchmoona/internal/transport/http/middleware"
-	"fetchmoona/pkg/ffmpeg"
-	"fetchmoona/pkg/response"
+	apperrors "downaria-api/internal/core/errors"
+	extractorcore "downaria-api/internal/extractors/core"
+	"downaria-api/internal/shared/util"
+	"downaria-api/internal/transport/http/middleware"
+	"downaria-api/pkg/ffmpeg"
+	"downaria-api/pkg/response"
 )
 
 type mergeRequest struct {

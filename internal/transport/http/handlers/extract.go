@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"fetchmoona/internal/app/services/extraction"
-	apperrors "fetchmoona/internal/core/errors"
-	"fetchmoona/internal/transport/http/middleware"
-	"fetchmoona/pkg/response"
+	"downaria-api/internal/app/services/extraction"
+	apperrors "downaria-api/internal/core/errors"
+	"downaria-api/internal/transport/http/middleware"
+	"downaria-api/pkg/response"
 )
 
 type extractRequest struct {

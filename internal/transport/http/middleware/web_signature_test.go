@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	apperrors "fetchmoona/internal/core/errors"
+	apperrors "downaria-api/internal/core/errors"
 )
 
 func TestRequireWebSignature_BodyTooLarge(t *testing.T) {

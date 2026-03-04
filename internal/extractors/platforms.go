@@ -3,15 +3,15 @@ package extractors
 import (
 	"regexp"
 
-	ariaextended "fetchmoona/internal/extractors/aria-extended"
-	extcore "fetchmoona/internal/extractors/core"
-	"fetchmoona/internal/extractors/native/facebook"
-	"fetchmoona/internal/extractors/native/instagram"
-	"fetchmoona/internal/extractors/native/pixiv"
-	"fetchmoona/internal/extractors/native/threads"
-	"fetchmoona/internal/extractors/native/tiktok"
-	"fetchmoona/internal/extractors/native/twitter"
-	"fetchmoona/internal/extractors/registry"
+	ariaextended "downaria-api/internal/extractors/aria-extended"
+	extcore "downaria-api/internal/extractors/core"
+	"downaria-api/internal/extractors/native/facebook"
+	"downaria-api/internal/extractors/native/instagram"
+	"downaria-api/internal/extractors/native/pixiv"
+	"downaria-api/internal/extractors/native/threads"
+	"downaria-api/internal/extractors/native/tiktok"
+	"downaria-api/internal/extractors/native/twitter"
+	"downaria-api/internal/extractors/registry"
 )
 
 type PlatformMetadata struct {

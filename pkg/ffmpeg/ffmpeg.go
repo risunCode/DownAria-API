@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	extractorcore "fetchmoona/internal/extractors/core"
+	extractorcore "downaria-api/internal/extractors/core"
 )
 
 const maxFFmpegStderrBytes = 64 << 10

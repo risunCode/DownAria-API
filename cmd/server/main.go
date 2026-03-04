@@ -10,8 +10,8 @@ import (
 	"syscall"
 	"time"
 
-	"fetchmoona/internal/app"
-	"fetchmoona/internal/core/config"
+	"downaria-api/internal/app"
+	"downaria-api/internal/core/config"
 	"github.com/joho/godotenv"
 )
 
@@ -35,7 +35,7 @@ func main() {
 		}
 	}()
 
-	log.Printf("starting FetchMoona on :%s", cfg.Port)
+	log.Printf("starting DownAria-API on :%s", cfg.Port)
 	if err := application.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("server failed: %v", err)
 	}

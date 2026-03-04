@@ -3,7 +3,7 @@ package ariaextended
 import (
 	"testing"
 
-	"fetchmoona/internal/extractors/core"
+	"downaria-api/internal/extractors/core"
 )
 
 func TestResolvePlatform_UsesStaticPlatformForKnownExtractor(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"fetchmoona/internal/extractors/core"
+	"downaria-api/internal/extractors/core"
 )
 
 type mockExtractor struct {

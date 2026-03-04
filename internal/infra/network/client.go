@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"fetchmoona/internal/shared/security"
+	"downaria-api/internal/shared/security"
 )
 
 var (

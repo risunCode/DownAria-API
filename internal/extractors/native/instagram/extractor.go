@@ -8,8 +8,8 @@ import (
 	"regexp"
 	"strings"
 
-	"fetchmoona/internal/extractors/core"
-	"fetchmoona/internal/shared/util"
+	"downaria-api/internal/extractors/core"
+	"downaria-api/internal/shared/util"
 )
 
 const (

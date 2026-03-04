@@ -11,12 +11,12 @@ import (
 	"testing"
 	"time"
 
-	"fetchmoona/internal/app/services/extraction"
-	"fetchmoona/internal/core/config"
-	apperrors "fetchmoona/internal/core/errors"
-	"fetchmoona/internal/core/ports"
-	"fetchmoona/internal/extractors/core"
-	"fetchmoona/internal/shared/security"
+	"downaria-api/internal/app/services/extraction"
+	"downaria-api/internal/core/config"
+	apperrors "downaria-api/internal/core/errors"
+	"downaria-api/internal/core/ports"
+	"downaria-api/internal/extractors/core"
+	"downaria-api/internal/shared/security"
 )
 
 type allowAllPublicResolver struct{}

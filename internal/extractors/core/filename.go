@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 var (
@@ -114,9 +115,10 @@ func sanitizeFilenameComponent(s string) string {
 	// Remove leading/trailing underscores
 	s = strings.Trim(s, "_")
 
-	// Keep components reasonably short
+	// Keep components reasonably short (UTF-8 safe)
 	if len(s) > 80 {
-		s = strings.Trim(strings.TrimSpace(s[:80]), "_")
+		s = truncateUTF8(s, 80)
+		s = strings.Trim(s, "_")
 	}
 
 	return s
@@ -165,8 +167,7 @@ func truncateFilename(filename string, maxLen int) string {
 	// Find last dot (extension)
 	lastDot := strings.LastIndex(filename, ".")
 	if lastDot == -1 {
-		// No extension, just truncate
-		return filename[:maxLen]
+		return truncateUTF8(filename, maxLen)
 	}
 
 	ext := filename[lastDot:]
@@ -174,15 +175,24 @@ func truncateFilename(filename string, maxLen int) string {
 	availableLen := maxLen - extLen
 
 	if availableLen <= 0 {
-		// Extension is too long, just truncate everything
-		return filename[:maxLen]
+		return truncateUTF8(filename, maxLen)
 	}
 
-	base := filename[:lastDot]
-	base = base[:availableLen]
+	base := truncateUTF8(filename[:lastDot], availableLen)
 	base = strings.TrimRight(base, "_")
 
 	return base + ext
+}
+
+// truncateUTF8 safely truncates a string to maxBytes without breaking multi-byte runes
+func truncateUTF8(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	for maxBytes > 0 && !utf8.RuneStart(s[maxBytes]) {
+		maxBytes--
+	}
+	return strings.TrimSpace(s[:maxBytes])
 }
 
 // GetExtensionFromMime returns file extension for a given MIME type

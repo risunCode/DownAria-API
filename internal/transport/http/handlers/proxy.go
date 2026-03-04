@@ -13,11 +13,11 @@ import (
 	"strings"
 	"time"
 
-	apperrors "fetchmoona/internal/core/errors"
-	"fetchmoona/internal/infra/network"
-	"fetchmoona/internal/shared/util"
-	"fetchmoona/internal/transport/http/middleware"
-	"fetchmoona/pkg/response"
+	apperrors "downaria-api/internal/core/errors"
+	"downaria-api/internal/infra/network"
+	"downaria-api/internal/shared/util"
+	"downaria-api/internal/transport/http/middleware"
+	"downaria-api/pkg/response"
 )
 
 const proxyHeadCacheTTL = 45 * time.Second

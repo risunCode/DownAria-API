@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strings"
 
-	apperrors "fetchmoona/internal/core/errors"
-	"fetchmoona/pkg/response"
+	apperrors "downaria-api/internal/core/errors"
+	"downaria-api/pkg/response"
 )
 
 func RequireOrigin(allowedOrigins []string) func(http.Handler) http.Handler {

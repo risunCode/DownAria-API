@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"fetchmoona/internal/core/ports"
+	"downaria-api/internal/core/ports"
 )
 
 // Ensure PublicStatsStore implements ports.StatsStore

@@ -1,14 +1,16 @@
 package httptransport
 
 import (
+	"log"
 	"net/http"
 
-	"fetchmoona/internal/core/config"
-	apperrors "fetchmoona/internal/core/errors"
-	"fetchmoona/internal/transport/http/handlers"
-	"fetchmoona/internal/transport/http/middleware"
-	"fetchmoona/pkg/response"
+	"downaria-api/internal/core/config"
+	apperrors "downaria-api/internal/core/errors"
+	"downaria-api/internal/transport/http/handlers"
+	"downaria-api/internal/transport/http/middleware"
+	"downaria-api/pkg/response"
 	"github.com/go-chi/chi/v5"
+	chimiddleware "github.com/go-chi/chi/v5/middleware"
 )
 
 func NewRouter(h *handlers.Handler, cfg config.Config) http.Handler {
@@ -17,6 +19,8 @@ func NewRouter(h *handlers.Handler, cfg config.Config) http.Handler {
 	webSignature := middleware.RequireWebSignature(cfg.WebInternalSharedSecret)
 	mergeEnabled := middleware.RequireMergeEnabled(cfg.MergeEnabled)
 	r := chi.NewRouter()
+
+	r.Use(chimiddleware.Recoverer)
 
 	r.NotFound(func(w http.ResponseWriter, req *http.Request) {
 		response.WriteErrorRequest(w, req, apperrors.HTTPStatus(apperrors.CodeNotFound), apperrors.CodeNotFound, "route not found, available prefixes are /api/v1/ (public) and /api/web/ (frontend)")
@@ -31,10 +35,14 @@ func NewRouter(h *handlers.Handler, cfg config.Config) http.Handler {
 	r.Get("/api/settings", h.Settings)
 	r.Get("/api/v1/stats/public", h.PublicStats)
 
+	// HLS stream routes - no signature required for player compatibility
+	r.Get("/api/web/hls-stream", h.HLSStream)
+	r.Get("/api/v1/hls-stream", h.HLSStream)
+
 	r.Route("/api/web", func(web chi.Router) {
 		web.Use(originProtected)
-		web.Use(antiBot)
 		web.Use(webSignature)
+		web.Use(antiBot)
 		web.Post("/extract", h.Extract)
 		web.Get("/proxy", h.Proxy)
 		web.Get("/download", h.Download)
@@ -47,6 +55,8 @@ func NewRouter(h *handlers.Handler, cfg config.Config) http.Handler {
 		v1.Get("/download", h.Download)
 		if cfg.WebInternalSharedSecret == "" {
 			v1.With(mergeEnabled).Post("/merge", h.Merge)
+		} else {
+			log.Println("WARN: /api/v1/merge route is disabled because WEB_INTERNAL_SHARED_SECRET is configured")
 		}
 	})
 

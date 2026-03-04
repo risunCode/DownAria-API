@@ -8,8 +8,8 @@ import (
 	"strings"
 	"sync"
 
-	extractcore "fetchmoona/internal/extractors/core"
-	"fetchmoona/internal/infra/network"
+	extractcore "downaria-api/internal/extractors/core"
+	"downaria-api/internal/infra/network"
 )
 
 var contentRangeTotalRe = regexp.MustCompile(`(?i)^bytes\s+\d+-\d+\/(\d+|\*)$`)

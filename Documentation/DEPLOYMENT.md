@@ -13,8 +13,8 @@ This guide covers deployment of the current Go server implementation.
 
 ```bash
 go mod download
-go build -o fetchmoona ./cmd/server
-./fetchmoona
+go build -o downaria-api ./cmd/server
+./downaria-api
 ```
 
 Server starts on `:<PORT>` and performs graceful shutdown (`SIGINT`/`SIGTERM`) with a `10s` timeout.
@@ -24,13 +24,13 @@ Server starts on `:<PORT>` and performs graceful shutdown (`SIGINT`/`SIGTERM`) w
 Build image:
 
 ```bash
-docker build -t fetchmoona:latest .
+docker build -t downaria-api:latest .
 ```
 
 Run container:
 
 ```bash
-docker run --rm -p 8080:8080 --env-file .env fetchmoona:latest
+docker run --rm -p 8080:8080 --env-file .env downaria-api:latest
 ```
 
 Notes:
@@ -81,7 +81,7 @@ MAX_MERGE_OUTPUT_SIZE_MB=512
 ```env
 PORT=8080
 PUBLIC_BASE_URL=https://api.example.com
-ALLOWED_ORIGINS=https://fetchmoona.example.com
+ALLOWED_ORIGINS=https://downaria.example.com
 
 UPSTREAM_TIMEOUT_MS=15000
 GLOBAL_RATE_LIMIT_WINDOW=200/4min

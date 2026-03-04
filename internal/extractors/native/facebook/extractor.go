@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"fetchmoona/internal/extractors/core"
-	"fetchmoona/internal/infra/network"
+	"downaria-api/internal/extractors/core"
+	"downaria-api/internal/infra/network"
 )
 
 var (
@@ -85,6 +85,12 @@ var (
 	fbTitleLikesPattern     = regexp.MustCompile(`(?i)([0-9]+(?:[.,][0-9]+)?\s*[kmb]?)\s*(?:reactions?|likes?)\b`)
 	fbTitleStatsPrefixRegex = regexp.MustCompile(`(?i)^\s*(?:[0-9]+(?:[.,][0-9]+)?\s*[kmb]?\s*(?:views?|reactions?|likes?)\s*(?:·\s*)?)+\|\s*`)
 	fbTitleSeparatorRegex   = regexp.MustCompile(`\s*([|·])\s*`)
+
+	fbInlineThumbnailPatterns = []*regexp.Regexp{
+		regexp.MustCompile(`"preferred_thumbnail":\{"uri":"(https:[^"]+)"`),
+		regexp.MustCompile(`"(?:previewImage|story_thumbnail|poster_image)":\{"uri":"(https:[^"]+)"`),
+		regexp.MustCompile(`"thumbnailImage":\{"uri":"(https:[^"]+)"`),
+	}
 )
 
 // FacebookExtractor handles Facebook media extraction using HTML scraping
@@ -390,6 +396,9 @@ func (e *FacebookExtractor) extractMetadata(html, finalURL string) fbMetadata {
 	}
 	if match := patterns["thumbnail"].FindStringSubmatch(html); len(match) > 1 {
 		m.Thumbnail = unescapeHTML(match[1])
+	}
+	if m.Thumbnail == "" {
+		m.Thumbnail = extractInlineThumbnail(html)
 	}
 
 	if isStory {
@@ -787,14 +796,27 @@ type rawFormat struct {
 
 func (e *FacebookExtractor) extractFormats(html string) []rawFormat {
 	formats := []rawFormat{}
-	seen := make(map[string]bool)
+	seenByURL := make(map[string]bool)
+	seenByCanonical := make(map[string]bool)
 
 	addFormat := func(quality, url string) {
+		quality = strings.TrimSpace(quality)
+		if quality == "" {
+			quality = "Original"
+		}
+
 		url = unescapeURL(url)
-		if url == "" || seen[url] {
+		if url == "" {
 			return
 		}
-		seen[url] = true
+
+		canonicalKey := normalizeQualityForDedup(quality) + "|" + canonicalURLForDedup(url)
+		if seenByURL[url] || seenByCanonical[canonicalKey] {
+			return
+		}
+
+		seenByURL[url] = true
+		seenByCanonical[canonicalKey] = true
 		formats = append(formats, rawFormat{Quality: quality, URL: url})
 	}
 
@@ -893,6 +915,37 @@ func (e *FacebookExtractor) extractFormats(html string) []rawFormat {
 	}
 
 	return formats
+}
+
+func extractInlineThumbnail(html string) string {
+	for _, pattern := range fbInlineThumbnailPatterns {
+		if match := pattern.FindStringSubmatch(html); len(match) > 1 {
+			thumb := strings.TrimSpace(unescapeURL(match[1]))
+			if thumb != "" {
+				return thumb
+			}
+		}
+	}
+
+	return ""
+}
+
+func normalizeQualityForDedup(quality string) string {
+	q := strings.ToUpper(strings.TrimSpace(quality))
+	if q == "" {
+		return "ORIGINAL"
+	}
+
+	return q
+}
+
+func canonicalURLForDedup(raw string) string {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || strings.TrimSpace(parsed.Host) == "" {
+		return strings.TrimSpace(raw)
+	}
+
+	return strings.ToLower(parsed.Host) + parsed.EscapedPath()
 }
 
 func unescapeURL(raw string) string {

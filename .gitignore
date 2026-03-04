@@ -8,7 +8,7 @@
 *.dll
 *.so
 *.dylib
-fetchmoona
+downaria-api
 main
 
 # Test binary

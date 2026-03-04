@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"fetchmoona/internal/core/config"
-	"fetchmoona/internal/transport/http/handlers"
+	"downaria-api/internal/core/config"
+	"downaria-api/internal/transport/http/handlers"
 )
 
 func TestRouter_HealthEndpoint(t *testing.T) {

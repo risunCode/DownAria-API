@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	apperrors "fetchmoona/internal/core/errors"
-	"fetchmoona/internal/extractors/core"
-	"fetchmoona/internal/extractors/registry"
-	"fetchmoona/internal/infra/cache"
+	apperrors "downaria-api/internal/core/errors"
+	"downaria-api/internal/extractors/core"
+	"downaria-api/internal/extractors/registry"
+	"downaria-api/internal/infra/cache"
 )
 
 // mockExtractor implements core.Extractor for testing

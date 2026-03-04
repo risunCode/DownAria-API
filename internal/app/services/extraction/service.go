@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
-	apperrors "fetchmoona/internal/core/errors"
-	ariaextended "fetchmoona/internal/extractors/aria-extended"
-	"fetchmoona/internal/extractors/core"
-	"fetchmoona/internal/extractors/registry"
-	"fetchmoona/internal/shared/security"
+	apperrors "downaria-api/internal/core/errors"
+	ariaextended "downaria-api/internal/extractors/aria-extended"
+	"downaria-api/internal/extractors/core"
+	"downaria-api/internal/extractors/registry"
+	"downaria-api/internal/shared/security"
 )
 
 var (

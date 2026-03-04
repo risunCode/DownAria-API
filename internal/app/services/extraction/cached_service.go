@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
-	"fetchmoona/internal/extractors/core"
-	"fetchmoona/internal/infra/cache"
+	"downaria-api/internal/extractors/core"
+	"downaria-api/internal/infra/cache"
 	"golang.org/x/sync/singleflight"
 )
 
