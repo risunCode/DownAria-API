@@ -9,6 +9,14 @@ import (
 	"strings"
 )
 
+// Sentinel errors for common validation cases
+var (
+	ErrInvalidURL          = stdErrors.New("invalid url")
+	ErrUnsupportedPlatform = stdErrors.New("unsupported platform")
+	ErrMissingHost         = stdErrors.New("missing host")
+	ErrUnsupportedScheme   = stdErrors.New("unsupported scheme")
+)
+
 type ErrorCategory string
 
 const (
@@ -129,6 +137,27 @@ func CategorizeError(err error) *AppError {
 	}
 
 	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+
+	// Check sentinel errors first
+	if stdErrors.Is(err, ErrUnsupportedScheme) || stdErrors.Is(err, ErrMissingHost) || stdErrors.Is(err, ErrInvalidURL) {
+		return &AppError{
+			Category: CategoryValidation,
+			Code:     CodeInvalidURL,
+			Message:  Message(CodeInvalidURL),
+			err:      err,
+		}
+	}
+
+	if stdErrors.Is(err, ErrUnsupportedPlatform) {
+		return &AppError{
+			Category: CategoryNotFound,
+			Code:     CodePlatformNotFound,
+			Message:  Message(CodePlatformNotFound),
+			err:      err,
+		}
+	}
+
+	// Fallback to string matching for external errors
 	switch {
 	case strings.Contains(msg, "unsupported scheme") || strings.Contains(msg, "missing host") || strings.Contains(msg, "invalid url"):
 		return &AppError{

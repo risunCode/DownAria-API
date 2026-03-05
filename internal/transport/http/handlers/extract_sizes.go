@@ -28,7 +28,7 @@ func (h *Handler) enrichVariantSizes(ctx context.Context, result *extractcore.Ex
 	for mi := range result.Media {
 		for vi := range result.Media[mi].Variants {
 			variant := &result.Media[mi].Variants[vi]
-			if variant == nil || variant.Size > 0 {
+			if variant == nil || variant.Filesize > 0 {
 				continue
 			}
 			targetURL := strings.TrimSpace(variant.URL)
@@ -79,7 +79,6 @@ func (h *Handler) enrichVariantSizes(ctx context.Context, result *extractcore.Ex
 			continue
 		}
 		for _, ref := range refs {
-			result.Media[ref.mediaIndex].Variants[ref.variantIndex].Size = size
 			result.Media[ref.mediaIndex].Variants[ref.variantIndex].Filesize = size
 		}
 	}

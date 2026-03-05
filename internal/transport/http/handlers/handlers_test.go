@@ -281,7 +281,7 @@ func TestExtractHandler_InvalidJSON(t *testing.T) {
 
 func TestExtractHandler_MissingURL(t *testing.T) {
 	h := newTestHandler()
-	h.extractor = &mockExtractor{err: extraction.ErrInvalidURL}
+	h.extractor = &mockExtractor{err: apperrors.ErrInvalidURL}
 
 	body := strings.NewReader(`{"cookie":"test"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/extract", body)
@@ -297,7 +297,7 @@ func TestExtractHandler_MissingURL(t *testing.T) {
 
 func TestExtractHandler_UnsupportedPlatformIncludesCategory(t *testing.T) {
 	h := newTestHandler()
-	h.extractor = &mockExtractor{err: extraction.ErrUnsupportedPlatform}
+	h.extractor = &mockExtractor{err: apperrors.ErrUnsupportedPlatform}
 
 	body := strings.NewReader(`{"url":"https://example.com/video"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/extract", body)

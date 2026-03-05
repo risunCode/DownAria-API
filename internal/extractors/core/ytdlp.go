@@ -49,7 +49,7 @@ type YTDLPThumbnail struct {
 type YTDLPFormat struct {
 	FormatID       string  `json:"format_id"`
 	FormatNote     string  `json:"format_note"`
-	Quality        string  `json:"quality"`
+	Quality        float64 `json:"quality"`
 	MimeType       string  `json:"mime_type"`
 	Ext            string  `json:"ext"`
 	URL            string  `json:"url"`
@@ -70,7 +70,7 @@ func RunYtDlpDump(ctx context.Context, targetURL string, extraArgs ...string) (*
 		ctx = context.Background()
 	}
 
-	args := []string{"--dump-json", "--no-download", "--no-warnings", "--no-playlist"}
+	args := []string{"--dump-json", "--no-download", "--no-warnings", "--no-playlist", "--js-runtimes", "node"}
 	args = append(args, extraArgs...)
 	args = append(args, targetURL)
 
@@ -101,7 +101,7 @@ func RunYtDlpGetURLs(ctx context.Context, targetURL, formatSelector string, extr
 		ctx = context.Background()
 	}
 
-	args := []string{"-g", "--no-warnings", "--no-playlist"}
+	args := []string{"-g", "--no-warnings", "--no-playlist", "--js-runtimes", "node"}
 	if strings.TrimSpace(formatSelector) != "" {
 		args = append(args, "-f", strings.TrimSpace(formatSelector))
 	}

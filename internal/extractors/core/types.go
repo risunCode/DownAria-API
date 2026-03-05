@@ -40,8 +40,7 @@ type Variant struct {
 	Resolution    string `json:"resolution,omitempty"`    // Resolution string (e.g., "1920x1080")
 	Mime          string `json:"mime,omitempty"`          // MIME type
 	Format        string `json:"format,omitempty"`        // File extension
-	Size          int64  `json:"size"`                    // File size in bytes (always present, 0 when unknown)
-	Filesize      int64  `json:"filesize"`                // Backward-compatible alias for file size
+	Filesize      int64  `json:"filesize"`                // File size in bytes (0 when unknown, matches yt-dlp)
 	Bitrate       int    `json:"bitrate,omitempty"`       // Bitrate in kbps
 	Codec         string `json:"codec,omitempty"`         // Video/audio codec
 	HasAudio      bool   `json:"hasAudio,omitempty"`      // Whether this variant has audio

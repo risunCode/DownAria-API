@@ -152,7 +152,7 @@ func (e *ThreadsExtractor) Extract(urlStr string, opts core.ExtractOptions) (*co
 		filename := core.GenerateFilenameWithMeta(handle, pickFirstNonEmpty(title, description), handle, postID, "mp4")
 		variant = variant.WithFilename(filename)
 		if size := e.probeContentLength(mediaURL, opts, selectedHeaders); size > 0 {
-			variant = variant.WithSize(size)
+			variant = variant.WithFilesize(size)
 		}
 		core.AddVariant(&media, variant)
 		builder.AddMedia(media)
@@ -164,7 +164,7 @@ func (e *ThreadsExtractor) Extract(urlStr string, opts core.ExtractOptions) (*co
 		filename := core.GenerateFilenameWithMeta(handle, pickFirstNonEmpty(title, description), handle, postID, "jpg")
 		variant = variant.WithFilename(filename)
 		if size := e.probeContentLength(mediaURL, opts, selectedHeaders); size > 0 {
-			variant = variant.WithSize(size)
+			variant = variant.WithFilesize(size)
 		}
 		core.AddVariant(&media, variant)
 		builder.AddMedia(media)

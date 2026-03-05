@@ -3,6 +3,23 @@
 All notable changes to **DownAria-API** are documented in this file.
 This format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.2.0] - 2026-03-05
+
+### Added
+- Structured logging with `log/slog` for JSON output and better observability
+- Enhanced health check endpoint with dependency monitoring (FFmpeg availability, memory pressure detection)
+- Health status types: `healthy`, `degraded`, and `unhealthy` with appropriate HTTP status codes
+- Dependency status reporting in health check responses
+
+### Changed
+- Migrated all logging from `log.Printf` to structured `log/slog` with proper severity levels
+- HTTP request logs now use JSON format with structured attributes for better log aggregation
+- Health check endpoint now returns detailed system information including dependency status
+
+### Fixed
+- **Critical:** HTTP request logs now show correct severity levels based on status code (info for 2xx/3xx, warn for 4xx, error for 5xx) instead of always showing "error"
+- Improved observability and monitoring capabilities with proper log severity classification
+
 ## [1.1.1] - 2026-03-04
 
 ### Changed

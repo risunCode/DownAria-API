@@ -65,7 +65,7 @@ func (h *Handler) HLSStream(w http.ResponseWriter, r *http.Request) {
 		// Determine proxy base URL
 		proxyBaseURL := h.config.PublicBaseURL
 		if proxyBaseURL == "" {
-			proxyBaseURL = fmt.Sprintf("http://localhost:%d", h.config.Port)
+			proxyBaseURL = fmt.Sprintf("http://localhost:%s", h.config.Port)
 		}
 
 		// Rewrite playlist URLs to point to /api/v1/hls-stream (public, no signature)

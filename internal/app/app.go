@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"strings"
 	"time"
 
 	"downaria-api/internal/core/config"
+	"downaria-api/internal/shared/logger"
 	"downaria-api/internal/shared/util"
 	httptransport "downaria-api/internal/transport/http"
 	"downaria-api/internal/transport/http/handlers"
@@ -26,7 +26,7 @@ func New(cfg config.Config) *Application {
 	router := httptransport.NewRouter(h, cfg)
 	trustedProxies, err := util.NewIPAllowlist(cfg.TrustedProxyCIDRs)
 	if err != nil {
-		log.Printf("invalid TRUSTED_PROXY_CIDRS value; falling back to direct remote addr only: %v", err)
+		logger.Warn("Invalid TRUSTED_PROXY_CIDRS value, falling back to direct remote addr only", "error", err)
 		trustedProxies = nil
 	}
 

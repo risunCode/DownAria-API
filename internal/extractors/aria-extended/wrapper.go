@@ -59,30 +59,30 @@ func (e *PythonExtractor) buildResultFromMeta(urlStr string, meta *core.YTDLPDum
 	}
 
 	qualityForFormat := func(f core.YTDLPFormat) string {
-		if quality := strings.TrimSpace(f.Quality); quality != "" {
-			if _, err := strconv.Atoi(quality); err == nil {
-				return quality + "p"
-			}
-			return quality
-		}
-		if note := strings.TrimSpace(f.FormatNote); note != "" {
-			return note
-		}
+		// Priority 1: Use height for video resolution (1080p, 720p, etc.)
 		if f.Height > 0 {
 			return fmt.Sprintf("%dp", f.Height)
 		}
+		// Priority 2: Use format note if available
+		if note := strings.TrimSpace(f.FormatNote); note != "" {
+			return note
+		}
+		// Priority 3: Use resolution string if available
 		if resolution := strings.TrimSpace(f.Resolution); resolution != "" && resolution != "audio only" {
 			return resolution
 		}
+		// Priority 4: For audio, use bitrate
 		if f.ABR > 0 {
 			return fmt.Sprintf("%dkbps", int(math.Round(f.ABR)))
 		}
 		if f.TBR > 0 {
 			return fmt.Sprintf("%dkbps", int(math.Round(f.TBR)))
 		}
+		// Priority 5: Fallback to format ID
 		if id := strings.TrimSpace(f.FormatID); id != "" {
 			return id
 		}
+		// Priority 6: Fallback to extension
 		if ext := strings.TrimSpace(f.Ext); ext != "" {
 			return strings.ToUpper(ext)
 		}
@@ -140,7 +140,10 @@ func (e *PythonExtractor) buildResultFromMeta(urlStr string, meta *core.YTDLPDum
 
 		// Some generic extractors expose quality but no height (e.g., 360/480/720/1080).
 		// Keep one variant per logical quality key instead of dropping them.
-		fallbackKey := strings.TrimSpace(f.Quality)
+		fallbackKey := ""
+		if f.Quality > 0 {
+			fallbackKey = fmt.Sprintf("%.0f", f.Quality)
+		}
 		if fallbackKey == "" {
 			fallbackKey = strings.TrimSpace(f.FormatID)
 		}
@@ -210,9 +213,9 @@ func (e *PythonExtractor) buildResultFromMeta(urlStr string, meta *core.YTDLPDum
 		}
 		variant = variant.WithCodec(codecForFormat(f))
 		if f.Filesize > 0 {
-			variant = variant.WithSize(f.Filesize)
+			variant = variant.WithFilesize(f.Filesize)
 		} else if f.FilesizeApprox > 0 {
-			variant = variant.WithSize(int64(math.Round(f.FilesizeApprox)))
+			variant = variant.WithFilesize(int64(math.Round(f.FilesizeApprox)))
 		}
 		variant = variant.WithAudio(f.ACodec != "" && f.ACodec != "none")
 		variant = variant.WithMerge(f.VCodec != "" && f.VCodec != "none" && (f.ACodec == "" || f.ACodec == "none"))
@@ -257,10 +260,8 @@ func rankVideoFormat(f core.YTDLPFormat) float64 {
 	if f.Height > 0 {
 		return float64(f.Height)*100000 + f.TBR
 	}
-	if q := strings.TrimSpace(f.Quality); q != "" {
-		if n, err := strconv.ParseFloat(q, 64); err == nil {
-			return n*100000 + f.TBR
-		}
+	if f.Quality > 0 {
+		return f.Quality*100000 + f.TBR
 	}
 	if fid := strings.TrimSpace(f.FormatID); fid != "" {
 		if n, err := strconv.ParseFloat(fid, 64); err == nil {

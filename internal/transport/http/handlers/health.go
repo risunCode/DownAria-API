@@ -3,6 +3,7 @@ package handlers
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"net/http"
 	"os"
 	"os/exec"
@@ -14,8 +15,37 @@ import (
 	"downaria-api/pkg/response"
 )
 
+// HealthStatus represents the overall health status
+type HealthStatus string
+
+const (
+	HealthStatusHealthy   HealthStatus = "healthy"
+	HealthStatusDegraded  HealthStatus = "degraded"
+	HealthStatusUnhealthy HealthStatus = "unhealthy"
+)
+
+// DependencyStatus represents the status of a dependency
+type DependencyStatus struct {
+	Name    string `json:"name"`
+	Status  string `json:"status"`
+	Message string `json:"message,omitempty"`
+}
+
 func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
-	response.WriteSuccessRequest(w, r, http.StatusOK, h.buildStatusPayload())
+	payload := h.buildStatusPayload()
+
+	// Determine HTTP status code based on health
+	statusCode := http.StatusOK
+	if status, ok := payload["status"].(HealthStatus); ok {
+		switch status {
+		case HealthStatusDegraded:
+			statusCode = http.StatusOK // Still return 200 for degraded
+		case HealthStatusUnhealthy:
+			statusCode = http.StatusServiceUnavailable
+		}
+	}
+
+	response.WriteSuccessRequest(w, r, statusCode, payload)
 }
 
 func (h *Handler) Root(w http.ResponseWriter, r *http.Request) {
@@ -34,9 +64,13 @@ func (h *Handler) buildStatusPayload() map[string]any {
 	tempDisk := readDiskUsage(os.TempDir())
 	hostname, _ := os.Hostname()
 
+	// Check dependencies
+	dependencies := h.checkDependencies()
+	overallStatus := h.determineOverallStatus(dependencies, availableRAM, totalRAM)
+
 	return map[string]any{
-		"status":       "ok",
-		"message":      "DownAria-API is running",
+		"status":       overallStatus,
+		"message":      h.getStatusMessage(overallStatus),
 		"timestamp":    now.Format(time.RFC3339),
 		"startedAt":    h.startedAt.UTC().Format(time.RFC3339),
 		"uptime":       formatUptime(uptime),
@@ -62,6 +96,92 @@ func (h *Handler) buildStatusPayload() map[string]any {
 			"root": rootDisk,
 			"temp": tempDisk,
 		},
+		"dependencies": dependencies,
+	}
+}
+
+func (h *Handler) checkDependencies() []DependencyStatus {
+	deps := []DependencyStatus{}
+
+	// Check FFmpeg availability (required for merge functionality)
+	ffmpegStatus := h.checkFFmpeg()
+	deps = append(deps, ffmpegStatus)
+
+	return deps
+}
+
+func (h *Handler) checkFFmpeg() DependencyStatus {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "ffmpeg", "-version")
+	output, err := cmd.Output()
+
+	if err != nil {
+		return DependencyStatus{
+			Name:    "ffmpeg",
+			Status:  "unavailable",
+			Message: "FFmpeg not found - merge functionality will not work",
+		}
+	}
+
+	// Parse version from output
+	lines := strings.Split(string(output), "\n")
+	version := "unknown"
+	if len(lines) > 0 {
+		parts := strings.Fields(lines[0])
+		if len(parts) >= 3 {
+			version = parts[2]
+		}
+	}
+
+	return DependencyStatus{
+		Name:    "ffmpeg",
+		Status:  "available",
+		Message: "version " + version,
+	}
+}
+
+func (h *Handler) determineOverallStatus(deps []DependencyStatus, availableRAM, totalRAM uint64) HealthStatus {
+	// Check for critical dependency failures
+	ffmpegAvailable := false
+	for _, dep := range deps {
+		if dep.Name == "ffmpeg" && dep.Status == "available" {
+			ffmpegAvailable = true
+		}
+	}
+
+	// Check memory pressure (less than 10% available)
+	memoryPressure := false
+	if totalRAM > 0 {
+		availablePercent := float64(availableRAM) / float64(totalRAM) * 100
+		if availablePercent < 10 {
+			memoryPressure = true
+		}
+	}
+
+	// Determine status
+	if !ffmpegAvailable {
+		return HealthStatusDegraded // Can still serve extraction, but not merge
+	}
+
+	if memoryPressure {
+		return HealthStatusDegraded
+	}
+
+	return HealthStatusHealthy
+}
+
+func (h *Handler) getStatusMessage(status HealthStatus) string {
+	switch status {
+	case HealthStatusHealthy:
+		return "DownAria-API is running"
+	case HealthStatusDegraded:
+		return "DownAria-API is running with degraded functionality"
+	case HealthStatusUnhealthy:
+		return "DownAria-API is unhealthy"
+	default:
+		return "DownAria-API status unknown"
 	}
 }
 

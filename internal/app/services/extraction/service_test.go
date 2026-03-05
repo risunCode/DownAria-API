@@ -96,7 +96,7 @@ func TestExtractionService_Extract_InvalidURL(t *testing.T) {
 			t.Errorf("expected error for URL %q, got nil", url)
 			continue
 		}
-		if !errors.Is(err, ErrInvalidURL) {
+		if !errors.Is(err, apperrors.ErrInvalidURL) {
 			t.Errorf("expected ErrInvalidURL for URL %q, got %v", url, err)
 		}
 	}
@@ -149,7 +149,7 @@ func TestExtractionService_Extract_NativePatternMissDoesNotFallback(t *testing.T
 	if err == nil {
 		t.Fatalf("expected unsupported platform error for native URL miss")
 	}
-	if !errors.Is(err, ErrUnsupportedPlatform) {
+	if !errors.Is(err, apperrors.ErrUnsupportedPlatform) {
 		t.Fatalf("expected ErrUnsupportedPlatform, got %v", err)
 	}
 	if fallbackCalls != 0 {
@@ -275,13 +275,13 @@ func TestValidateHTTPURL(t *testing.T) {
 
 func TestTypedError(t *testing.T) {
 	inner := errors.New("inner error")
-	te := typedError{kind: ErrInvalidURL, err: inner}
+	te := typedError{kind: apperrors.ErrInvalidURL, err: inner}
 
 	if te.Error() != inner.Error() {
 		t.Errorf("Error() = %v, want %v", te.Error(), inner.Error())
 	}
 
-	if !errors.Is(te, ErrInvalidURL) {
+	if !errors.Is(te, apperrors.ErrInvalidURL) {
 		t.Error("expected errors.Is to match ErrInvalidURL")
 	}
 }

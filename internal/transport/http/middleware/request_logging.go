@@ -2,10 +2,10 @@ package middleware
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"time"
 
+	"downaria-api/internal/shared/logger"
 	"downaria-api/internal/shared/util"
 )
 
@@ -47,7 +47,24 @@ func StructuredLogging(next http.Handler) http.Handler {
 
 		latencyMS := time.Since(start).Milliseconds()
 		requestID := RequestIDFromContext(r.Context())
-		log.Printf("request_id=%s method=%s path=%s status=%d latency_ms=%d", requestID, r.Method, r.URL.Path, recorder.statusCode, latencyMS)
+
+		// Log with appropriate severity based on status code
+		logAttrs := []any{
+			"request_id", requestID,
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", recorder.statusCode,
+			"latency_ms", latencyMS,
+		}
+
+		switch {
+		case recorder.statusCode >= 500:
+			logger.Error("HTTP request", logAttrs...)
+		case recorder.statusCode >= 400:
+			logger.Warn("HTTP request", logAttrs...)
+		default:
+			logger.Info("HTTP request", logAttrs...)
+		}
 	})
 }
 

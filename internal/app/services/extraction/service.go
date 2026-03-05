@@ -2,7 +2,6 @@ package extraction
 
 import (
 	"context"
-	"errors"
 	"log"
 	"math"
 	"net/url"
@@ -15,11 +14,6 @@ import (
 	"downaria-api/internal/extractors/core"
 	"downaria-api/internal/extractors/registry"
 	"downaria-api/internal/shared/security"
-)
-
-var (
-	ErrInvalidURL          = errors.New("invalid url")
-	ErrUnsupportedPlatform = errors.New("unsupported platform")
 )
 
 type ExtractInput struct {
@@ -101,21 +95,21 @@ func NewService(reg *registry.Registry, timeoutSeconds int, maxRetries int, retr
 func (s *extractionService) Extract(ctx context.Context, input ExtractInput) (*core.ExtractResult, error) {
 	targetURL, err := validateHTTPURL(input.URL)
 	if err != nil {
-		return nil, typedError{kind: ErrInvalidURL, err: err}
+		return nil, typedError{kind: apperrors.ErrInvalidURL, err: err}
 	}
 
 	extractor, platform, err := s.registry.GetExtractor(targetURL)
 	allowServerCookie := true
 	if err != nil {
 		if isNativePlatformURL(targetURL) {
-			return nil, typedError{kind: ErrUnsupportedPlatform, err: err}
+			return nil, typedError{kind: apperrors.ErrUnsupportedPlatform, err: err}
 		}
 		if s.fallback == nil {
-			return nil, typedError{kind: ErrUnsupportedPlatform, err: err}
+			return nil, typedError{kind: apperrors.ErrUnsupportedPlatform, err: err}
 		}
 		extractor = s.fallback()
 		if extractor == nil {
-			return nil, typedError{kind: ErrUnsupportedPlatform, err: err}
+			return nil, typedError{kind: apperrors.ErrUnsupportedPlatform, err: err}
 		}
 		platform = ""
 		allowServerCookie = false

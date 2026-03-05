@@ -12,6 +12,7 @@ import (
 
 	"downaria-api/internal/app"
 	"downaria-api/internal/core/config"
+	"downaria-api/internal/shared/logger"
 	"github.com/joho/godotenv"
 )
 
@@ -28,15 +29,19 @@ func main() {
 
 	go func() {
 		<-sigCtx.Done()
+		logger.Info("Shutdown signal received, initiating graceful shutdown...")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := application.Stop(shutdownCtx); err != nil {
-			log.Printf("graceful shutdown finished with errors: %v", err)
+			logger.Error("Graceful shutdown finished with errors", "error", err)
+		} else {
+			logger.Info("Graceful shutdown completed successfully")
 		}
 	}()
 
-	log.Printf("starting DownAria-API on :%s", cfg.Port)
+	logger.Info("Starting DownAria-API", "port", cfg.Port)
 	if err := application.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Fatalf("server failed: %v", err)
+		logger.Error("Server failed to start", "error", err)
+		os.Exit(1)
 	}
 }

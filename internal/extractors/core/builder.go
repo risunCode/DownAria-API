@@ -132,10 +132,9 @@ func (v Variant) WithMime(mime string) Variant {
 	return v
 }
 
-// WithSize sets file size
-func (v Variant) WithSize(size int64) Variant {
-	v.Size = size
-	v.Filesize = size
+// WithFilesize sets file size (0 when unknown)
+func (v Variant) WithFilesize(filesize int64) Variant {
+	v.Filesize = filesize
 	return v
 }
 

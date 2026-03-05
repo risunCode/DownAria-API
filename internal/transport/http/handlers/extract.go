@@ -94,7 +94,7 @@ func cookieSourceLabel(source string) string {
 }
 
 func (h *Handler) mapExtractError(err error) (status int, code, message, category string, metadata map[string]any, retryAfter int) {
-	if errors.Is(err, extraction.ErrInvalidURL) {
+	if errors.Is(err, apperrors.ErrInvalidURL) {
 		code = apperrors.CodeInvalidURL
 		message = apperrors.Message(code)
 		status = apperrors.HTTPStatus(code)
@@ -102,7 +102,7 @@ func (h *Handler) mapExtractError(err error) (status int, code, message, categor
 		return
 	}
 
-	if errors.Is(err, extraction.ErrUnsupportedPlatform) {
+	if errors.Is(err, apperrors.ErrUnsupportedPlatform) {
 		code = apperrors.CodePlatformNotFound
 		message = apperrors.Message(code)
 		status = apperrors.HTTPStatus(code)

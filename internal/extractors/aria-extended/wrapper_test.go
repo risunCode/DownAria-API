@@ -127,8 +127,8 @@ func TestBuildResultFromMeta_DedupePrefersKnownSizeForSameResolution(t *testing.
 	if variant.FormatID != "known-size" {
 		t.Fatalf("expected formatID known-size, got %q", variant.FormatID)
 	}
-	if variant.Size != 5_000_000 {
-		t.Fatalf("expected variant size 5000000, got %d", variant.Size)
+	if variant.Filesize != 5_000_000 {
+		t.Fatalf("expected variant filesize 5000000, got %d", variant.Filesize)
 	}
 }
 
@@ -139,10 +139,10 @@ func TestBuildResultFromMeta_KeepsNoHeightQualityVariantsSortedHighToLow(t *test
 		Title:    "Rule34 sample",
 		Uploader: "artist",
 		Formats: []core.YTDLPFormat{
-			{FormatID: "0", Quality: "360", URL: "https://cdn.example/360.mp4", Ext: "mp4", VCodec: "avc1", ACodec: "none"},
-			{FormatID: "3", Quality: "1080", URL: "https://cdn.example/1080.mp4", Ext: "mp4", VCodec: "avc1", ACodec: "none"},
-			{FormatID: "2", Quality: "720", URL: "https://cdn.example/720.mp4", Ext: "mp4", VCodec: "avc1", ACodec: "none"},
-			{FormatID: "1", Quality: "480", URL: "https://cdn.example/480.mp4", Ext: "mp4", VCodec: "avc1", ACodec: "none"},
+			{FormatID: "0", Quality: 360, Height: 360, URL: "https://cdn.example/360.mp4", Ext: "mp4", VCodec: "avc1", ACodec: "none"},
+			{FormatID: "3", Quality: 1080, Height: 1080, URL: "https://cdn.example/1080.mp4", Ext: "mp4", VCodec: "avc1", ACodec: "none"},
+			{FormatID: "2", Quality: 720, Height: 720, URL: "https://cdn.example/720.mp4", Ext: "mp4", VCodec: "avc1", ACodec: "none"},
+			{FormatID: "1", Quality: 480, Height: 480, URL: "https://cdn.example/480.mp4", Ext: "mp4", VCodec: "avc1", ACodec: "none"},
 		},
 	}
 
