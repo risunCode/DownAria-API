@@ -33,6 +33,7 @@ type mergeRequest struct {
 	Filename  string `json:"filename,omitempty"`
 	UserAgent string `json:"userAgent,omitempty"`
 	Platform  string `json:"platform,omitempty"`
+	Cookie    string `json:"cookie,omitempty"`
 }
 
 func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
@@ -162,8 +163,28 @@ func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
 		if isYouTubeURL(targetURL) {
 			selector := buildYTDLPFormatSelector(req.Quality, true)
 			ytCtx, cancelYTDLP := withCommandTimeout(r.Context(), 35*time.Second)
-			urls, err := extractorcore.RunYtDlpGetURLs(ytCtx, targetURL, selector)
+
+			// Handle cookies for YouTube authentication
+			var cookieFile string
+			var cookieErr error
+			if cookie := strings.TrimSpace(req.Cookie); cookie != "" {
+				cookieFile, cookieErr = extractorcore.CreateTempCookieFile(cookie, ".youtube.com")
+				if cookieErr != nil {
+					log.Printf("request_id=%s component=merge event=cookie_file_creation_failed err=%s", requestID, redactLogError(cookieErr))
+				} else if cookieFile != "" {
+					defer extractorcore.CleanupCookieFile(cookieFile)
+				}
+			}
+
+			var urls []string
+			var err error
+			if cookieFile != "" {
+				urls, err = extractorcore.RunYtDlpGetURLsWithCookies(ytCtx, targetURL, selector, cookieFile)
+			} else {
+				urls, err = extractorcore.RunYtDlpGetURLs(ytCtx, targetURL, selector)
+			}
 			cancelYTDLP()
+
 			if err != nil {
 				log.Printf("request_id=%s component=merge event=ytdlp_audio_resolve_failed err=%s", requestID, redactLogError(err))
 				_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeMergeFailed), apperrors.CodeMergeFailed, "failed to resolve media stream")
@@ -219,8 +240,28 @@ func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
 
 	selector := buildYTDLPFormatSelector(req.Quality, false)
 	ytCtx, cancelYTDLP := withCommandTimeout(r.Context(), 35*time.Second)
-	urls, err := extractorcore.RunYtDlpGetURLs(ytCtx, targetURL, selector)
+
+	// Handle cookies for YouTube authentication
+	var cookieFile string
+	var cookieErr error
+	if cookie := strings.TrimSpace(req.Cookie); cookie != "" {
+		cookieFile, cookieErr = extractorcore.CreateTempCookieFile(cookie, ".youtube.com")
+		if cookieErr != nil {
+			log.Printf("request_id=%s component=merge event=cookie_file_creation_failed err=%s", requestID, redactLogError(cookieErr))
+		} else if cookieFile != "" {
+			defer extractorcore.CleanupCookieFile(cookieFile)
+		}
+	}
+
+	var urls []string
+	var err error
+	if cookieFile != "" {
+		urls, err = extractorcore.RunYtDlpGetURLsWithCookies(ytCtx, targetURL, selector, cookieFile)
+	} else {
+		urls, err = extractorcore.RunYtDlpGetURLs(ytCtx, targetURL, selector)
+	}
 	cancelYTDLP()
+
 	if err != nil {
 		log.Printf("request_id=%s component=merge event=ytdlp_stream_resolve_failed err=%s", requestID, redactLogError(err))
 		_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeMergeFailed), apperrors.CodeMergeFailed, "failed to resolve media streams")

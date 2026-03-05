@@ -96,6 +96,44 @@ func RunYtDlpDump(ctx context.Context, targetURL string, extraArgs ...string) (*
 	return &meta, nil
 }
 
+// RunYtDlpDumpWithCookies runs yt-dlp with cookie file support
+func RunYtDlpDumpWithCookies(ctx context.Context, targetURL, cookieFile string, extraArgs ...string) (*YTDLPDumpJSON, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	args := []string{"--dump-json", "--no-download", "--no-warnings", "--no-playlist", "--js-runtimes", "node"}
+
+	// Add cookie file if provided
+	if cookieFile != "" {
+		args = append(args, "--cookies", cookieFile)
+	}
+
+	args = append(args, extraArgs...)
+	args = append(args, targetURL)
+
+	runCtx, cancel := context.WithTimeout(ctx, ytdlpDumpTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(runCtx, "yt-dlp", args...)
+	stdout := NewBoundedBuffer(ytdlpMaxDumpStdout)
+	stderr := NewBoundedBuffer(ytdlpMaxCommandStderr)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("yt-dlp execution failed: %w: %s", err, stderr.String())
+	}
+
+	var meta YTDLPDumpJSON
+	dec := json.NewDecoder(bytes.NewReader(stdout.Bytes()))
+	if err := dec.Decode(&meta); err != nil {
+		return nil, err
+	}
+
+	return &meta, nil
+}
+
 func RunYtDlpGetURLs(ctx context.Context, targetURL, formatSelector string, extraArgs ...string) ([]string, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -105,6 +143,55 @@ func RunYtDlpGetURLs(ctx context.Context, targetURL, formatSelector string, extr
 	if strings.TrimSpace(formatSelector) != "" {
 		args = append(args, "-f", strings.TrimSpace(formatSelector))
 	}
+	args = append(args, extraArgs...)
+	args = append(args, targetURL)
+
+	runCtx, cancel := context.WithTimeout(ctx, ytdlpGetURLsTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(runCtx, "yt-dlp", args...)
+	stdout := NewBoundedBuffer(ytdlpMaxURLsStdout)
+	stderr := NewBoundedBuffer(ytdlpMaxCommandStderr)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("yt-dlp url resolve failed: %w: %s", err, stderr.String())
+	}
+
+	lines := strings.Split(stdout.String(), "\n")
+	urls := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		urls = append(urls, line)
+	}
+
+	if len(urls) == 0 {
+		return nil, fmt.Errorf("yt-dlp did not return stream urls")
+	}
+
+	return urls, nil
+}
+
+// RunYtDlpGetURLsWithCookies runs yt-dlp with cookie file support for URL extraction
+func RunYtDlpGetURLsWithCookies(ctx context.Context, targetURL, formatSelector, cookieFile string, extraArgs ...string) ([]string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	args := []string{"-g", "--no-warnings", "--no-playlist", "--js-runtimes", "node"}
+	if strings.TrimSpace(formatSelector) != "" {
+		args = append(args, "-f", strings.TrimSpace(formatSelector))
+	}
+
+	// Add cookie file if provided
+	if cookieFile != "" {
+		args = append(args, "--cookies", cookieFile)
+	}
+
 	args = append(args, extraArgs...)
 	args = append(args, targetURL)
 

@@ -35,9 +35,28 @@ func (e *PythonExtractor) Extract(urlStr string, opts core.ExtractOptions) (*cor
 	defer cancel()
 
 	extraArgs := make([]string, 0, 6)
+
+	// Handle cookies - create temp file for yt-dlp
+	var cookieFile string
+	var err error
 	if cookie := strings.TrimSpace(opts.Cookie); cookie != "" {
-		extraArgs = append(extraArgs, "--add-header", fmt.Sprintf("Cookie: %s", cookie))
+		// Determine domain from URL
+		domain := ".youtube.com" // Default for YouTube
+		if strings.Contains(urlStr, "youtube.com") || strings.Contains(urlStr, "youtu.be") {
+			domain = ".youtube.com"
+		}
+
+		cookieFile, err = core.CreateTempCookieFile(cookie, domain)
+		if err != nil {
+			// Fallback to header method if cookie file creation fails
+			extraArgs = append(extraArgs, "--add-header", fmt.Sprintf("Cookie: %s", cookie))
+		} else if cookieFile != "" {
+			// Cleanup temp cookie file after extraction
+			defer core.CleanupCookieFile(cookieFile)
+		}
 	}
+
+	// Add custom headers
 	for key, value := range opts.Headers {
 		if strings.TrimSpace(key) == "" || strings.TrimSpace(value) == "" {
 			continue
@@ -45,7 +64,15 @@ func (e *PythonExtractor) Extract(urlStr string, opts core.ExtractOptions) (*cor
 		extraArgs = append(extraArgs, "--add-header", fmt.Sprintf("%s: %s", key, value))
 	}
 
-	meta, err := core.RunYtDlpDump(ctx, urlStr, extraArgs...)
+	var meta *core.YTDLPDumpJSON
+	if cookieFile != "" {
+		// Use cookie file method (preferred for YouTube)
+		meta, err = core.RunYtDlpDumpWithCookies(ctx, urlStr, cookieFile, extraArgs...)
+	} else {
+		// Use standard method
+		meta, err = core.RunYtDlpDump(ctx, urlStr, extraArgs...)
+	}
+
 	if err != nil {
 		return nil, err
 	}

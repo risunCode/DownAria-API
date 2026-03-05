@@ -10,14 +10,19 @@ This format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Enhanced health check endpoint with dependency monitoring (FFmpeg availability, memory pressure detection)
 - Health status types: `healthy`, `degraded`, and `unhealthy` with appropriate HTTP status codes
 - Dependency status reporting in health check responses
+- Cookie file support for YouTube authentication via yt-dlp
+- Netscape cookie format parser for proper YouTube authentication handling
+- Cookie parameter support in merge endpoint for authenticated video processing
 
 ### Changed
 - Migrated all logging from `log.Printf` to structured `log/slog` with proper severity levels
 - HTTP request logs now use JSON format with structured attributes for better log aggregation
 - Health check endpoint now returns detailed system information including dependency status
+- YouTube extraction now uses temporary cookie files instead of HTTP headers for authentication
 
 ### Fixed
 - **Critical:** HTTP request logs now show correct severity levels based on status code (info for 2xx/3xx, warn for 4xx, error for 5xx) instead of always showing "error"
+- **Critical:** YouTube authentication now works correctly with user-provided cookies (previously failed with AUTH_REQUIRED error)
 - Improved observability and monitoring capabilities with proper log severity classification
 
 ## [1.1.1] - 2026-03-04
