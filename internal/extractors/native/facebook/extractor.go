@@ -584,7 +584,8 @@ func (e *FacebookExtractor) buildVariantFilename(metadata fbMetadata, finalURL, 
 		}
 
 		storyID := buildStoryIdentifier(metadata.CreatedAt, finalURL)
-		return core.GenerateFilename(author, "story", storyID, ext)
+		_ = storyID
+		return core.GenerateFilename(author, "story", "", ext)
 	}
 
 	return core.GenerateFilenameWithMeta(metadata.Author, metadata.Title, metadata.Author, "", ext)

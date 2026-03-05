@@ -72,6 +72,7 @@ func (h *Handler) Extract(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.enrichVariantSizes(r.Context(), result, middleware.RequestIDFromContext(r.Context()))
+	h.ensureVariantFilenames(result)
 
 	h.statsStore.RecordExtraction(time.Now().UTC())
 	builder.WithCookieSource(cookieSourceLabel(string(result.Authentication.Source)))

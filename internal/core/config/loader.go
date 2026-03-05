@@ -40,6 +40,26 @@ func Load() Config {
 	if timeoutMS < 1 {
 		timeoutMS = 10000
 	}
+	upstreamConnectTimeoutMS := getIntEnv("UPSTREAM_CONNECT_TIMEOUT_MS", timeoutMS)
+	if upstreamConnectTimeoutMS < 1 {
+		upstreamConnectTimeoutMS = timeoutMS
+	}
+	upstreamTLSHandshakeTimeoutMS := getIntEnv("UPSTREAM_TLS_HANDSHAKE_TIMEOUT_MS", timeoutMS)
+	if upstreamTLSHandshakeTimeoutMS < 1 {
+		upstreamTLSHandshakeTimeoutMS = timeoutMS
+	}
+	upstreamResponseHeaderTimeoutMS := getIntEnv("UPSTREAM_RESPONSE_HEADER_TIMEOUT_MS", timeoutMS)
+	if upstreamResponseHeaderTimeoutMS < 1 {
+		upstreamResponseHeaderTimeoutMS = timeoutMS
+	}
+	upstreamIdleConnTimeoutMS := getIntEnv("UPSTREAM_IDLE_CONN_TIMEOUT_MS", 90000)
+	if upstreamIdleConnTimeoutMS < 1 {
+		upstreamIdleConnTimeoutMS = 90000
+	}
+	upstreamKeepAliveTimeoutMS := getIntEnv("UPSTREAM_KEEPALIVE_TIMEOUT_MS", 30000)
+	if upstreamKeepAliveTimeoutMS < 1 {
+		upstreamKeepAliveTimeoutMS = 30000
+	}
 	mergeEnabled := getBoolEnv("MERGE_ENABLED", false)
 	publicBaseURL := strings.TrimSpace(getEnv("PUBLIC_BASE_URL", ""))
 	if publicBaseURL == "" {
@@ -88,39 +108,104 @@ func Load() Config {
 		extractionRetryDelayMs = 500
 	}
 
-	return Config{
-		Port:                        port,
-		AllowedOrigins:              allowedOrigins,
-		TrustedProxyCIDRs:           trustedProxyCIDRs,
-		GlobalRateLimitLimit:        globalRateLimitLimit,
-		GlobalRateLimitWindow:       globalRateLimitWindow,
-		GlobalRateLimitRule:         globalRateLimitRule,
-		GlobalRateLimitMaxBuckets:   globalRateLimitMaxBuckets,
-		GlobalRateLimitBucketTTL:    globalRateLimitBucketTTL,
-		UpstreamTimeout:             time.Duration(timeoutMS) * time.Millisecond,
-		MergeEnabled:                mergeEnabled,
-		PublicBaseURL:               publicBaseURL,
-		UpstreamTimeoutMS:           timeoutMS,
-		MaxDownloadSizeMB:           maxDownloadMB,
-		MaxMergeOutputSizeMB:        maxMergeOutputMB,
-		ServerReadTimeout:           serverReadTimeout,
-		ServerReadHeaderTimeout:     serverReadHeaderTimeout,
-		ServerWriteTimeout:          serverWriteTimeout,
-		ServerIdleTimeout:           serverIdleTimeout,
-		ServerMaxHeaderBytes:        serverMaxHeaderBytes,
-		WebInternalSharedSecret:     webInternalSharedSecret,
-		StatsPersistEnabled:         statsPersistEnabled,
-		StatsPersistFilePath:        statsPersistFilePath,
-		StatsPersistFlushInterval:   time.Duration(statsPersistFlushIntervalMS) * time.Millisecond,
-		StatsPersistFlushIntervalMS: statsPersistFlushIntervalMS,
-		StatsPersistFlushThreshold:  statsPersistFlushThreshold,
-		ExtractionMaxRetries:        extractionMaxRetries,
-		ExtractionRetryDelayMs:      extractionRetryDelayMs,
-		CacheExtractionTTL:          extractionDefaultTTL,
-		CacheExtractionPlatformTTLs: cacheExtractionPlatformTTLs,
-		CacheProxyHeadTTL:           cacheProxyHeadTTL,
-		CacheCleanupInterval:        cacheCleanupInterval,
+	streamingDownloadEnabled := getBoolEnv("STREAMING_DOWNLOAD_ENABLED", true)
+	concurrentMergeEnabled := getBoolEnv("CONCURRENT_MERGE_ENABLED", false)
+	hlsStreamingEnabled := getBoolEnv("HLS_STREAMING_ENABLED", true)
+	hlsMergeEnabled := getBoolEnv("HLS_MERGE_ENABLED", true)
+
+	mergeWorkerCount := getIntEnv("MERGE_WORKER_COUNT", 3)
+	if mergeWorkerCount <= 0 {
+		mergeWorkerCount = 3
 	}
+	hlsSegmentWorkerCount := getIntEnv("HLS_SEGMENT_WORKER_COUNT", 5)
+	if hlsSegmentWorkerCount <= 0 {
+		hlsSegmentWorkerCount = 5
+	}
+	hlsSegmentMaxRetries := getIntEnv("HLS_SEGMENT_MAX_RETRIES", 3)
+	if hlsSegmentMaxRetries < 0 {
+		hlsSegmentMaxRetries = 3
+	}
+
+	bufferSizeVideo := getIntEnv("BUFFER_SIZE_VIDEO", 256*1024)
+	if bufferSizeVideo <= 0 {
+		bufferSizeVideo = 256 * 1024
+	}
+	bufferSizeAudio := getIntEnv("BUFFER_SIZE_AUDIO", 64*1024)
+	if bufferSizeAudio <= 0 {
+		bufferSizeAudio = 64 * 1024
+	}
+
+	streamingDownloadRollout := boundedPercent(getIntEnv("FEATURE_STREAMING_DOWNLOAD_ROLLOUT", 100))
+	concurrentMergeRollout := boundedPercent(getIntEnv("FEATURE_CONCURRENT_MERGE_ROLLOUT", 100))
+	hlsStreamingRollout := boundedPercent(getIntEnv("FEATURE_HLS_STREAMING_ROLLOUT", 100))
+	hlsMergeRollout := boundedPercent(getIntEnv("FEATURE_HLS_MERGE_ROLLOUT", 100))
+
+	return Config{
+		Port:                            port,
+		AllowedOrigins:                  allowedOrigins,
+		TrustedProxyCIDRs:               trustedProxyCIDRs,
+		GlobalRateLimitLimit:            globalRateLimitLimit,
+		GlobalRateLimitWindow:           globalRateLimitWindow,
+		GlobalRateLimitRule:             globalRateLimitRule,
+		GlobalRateLimitMaxBuckets:       globalRateLimitMaxBuckets,
+		GlobalRateLimitBucketTTL:        globalRateLimitBucketTTL,
+		UpstreamTimeout:                 time.Duration(timeoutMS) * time.Millisecond,
+		UpstreamConnectTimeout:          time.Duration(upstreamConnectTimeoutMS) * time.Millisecond,
+		UpstreamTLSHandshakeTimeout:     time.Duration(upstreamTLSHandshakeTimeoutMS) * time.Millisecond,
+		UpstreamResponseHeaderTimeout:   time.Duration(upstreamResponseHeaderTimeoutMS) * time.Millisecond,
+		UpstreamIdleConnTimeout:         time.Duration(upstreamIdleConnTimeoutMS) * time.Millisecond,
+		UpstreamKeepAliveTimeout:        time.Duration(upstreamKeepAliveTimeoutMS) * time.Millisecond,
+		MergeEnabled:                    mergeEnabled,
+		PublicBaseURL:                   publicBaseURL,
+		UpstreamTimeoutMS:               timeoutMS,
+		UpstreamConnectTimeoutMS:        upstreamConnectTimeoutMS,
+		UpstreamTLSHandshakeTimeoutMS:   upstreamTLSHandshakeTimeoutMS,
+		UpstreamResponseHeaderTimeoutMS: upstreamResponseHeaderTimeoutMS,
+		UpstreamIdleConnTimeoutMS:       upstreamIdleConnTimeoutMS,
+		UpstreamKeepAliveTimeoutMS:      upstreamKeepAliveTimeoutMS,
+		MaxDownloadSizeMB:               maxDownloadMB,
+		MaxMergeOutputSizeMB:            maxMergeOutputMB,
+		ServerReadTimeout:               serverReadTimeout,
+		ServerReadHeaderTimeout:         serverReadHeaderTimeout,
+		ServerWriteTimeout:              serverWriteTimeout,
+		ServerIdleTimeout:               serverIdleTimeout,
+		ServerMaxHeaderBytes:            serverMaxHeaderBytes,
+		WebInternalSharedSecret:         webInternalSharedSecret,
+		StatsPersistEnabled:             statsPersistEnabled,
+		StatsPersistFilePath:            statsPersistFilePath,
+		StatsPersistFlushInterval:       time.Duration(statsPersistFlushIntervalMS) * time.Millisecond,
+		StatsPersistFlushIntervalMS:     statsPersistFlushIntervalMS,
+		StatsPersistFlushThreshold:      statsPersistFlushThreshold,
+		ExtractionMaxRetries:            extractionMaxRetries,
+		ExtractionRetryDelayMs:          extractionRetryDelayMs,
+		CacheExtractionTTL:              extractionDefaultTTL,
+		CacheExtractionPlatformTTLs:     cacheExtractionPlatformTTLs,
+		CacheProxyHeadTTL:               cacheProxyHeadTTL,
+		CacheCleanupInterval:            cacheCleanupInterval,
+		StreamingDownloadEnabled:        streamingDownloadEnabled,
+		ConcurrentMergeEnabled:          concurrentMergeEnabled,
+		HLSStreamingEnabled:             hlsStreamingEnabled,
+		HLSMergeEnabled:                 hlsMergeEnabled,
+		MergeWorkerCount:                mergeWorkerCount,
+		HLSSegmentWorkerCount:           hlsSegmentWorkerCount,
+		HLSSegmentMaxRetries:            hlsSegmentMaxRetries,
+		BufferSizeVideo:                 bufferSizeVideo,
+		BufferSizeAudio:                 bufferSizeAudio,
+		StreamingDownloadRollout:        streamingDownloadRollout,
+		ConcurrentMergeRollout:          concurrentMergeRollout,
+		HLSStreamingRollout:             hlsStreamingRollout,
+		HLSMergeRollout:                 hlsMergeRollout,
+	}
+}
+
+func boundedPercent(v int) int {
+	if v < 0 {
+		return 0
+	}
+	if v > 100 {
+		return 100
+	}
+	return v
 }
 
 func parseGlobalRateLimitWindow(raw string, fallbackLimit int, fallbackWindow time.Duration) (int, time.Duration) {

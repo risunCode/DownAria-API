@@ -47,6 +47,7 @@ var twitterGraphQLFeatures = map[string]bool{
 }
 
 var tweetIDRegex = regexp.MustCompile(`/status/(\d+)`)
+var twitterResolutionRegex = regexp.MustCompile(`/(\d{2,5})x(\d{2,5})/`)
 
 type TwitterExtractor struct {
 	*core.BaseExtractor
@@ -335,6 +336,8 @@ func (e *TwitterExtractor) buildResult(urlStr string, data *twitterExtractData, 
 				variants = append(variants, twitterVariant{Bitrate: variant.Bitrate, URL: variantURL})
 			}
 
+			variants = filterHLSVariantsWhenProgressiveAudioExists(item.Type, variants)
+
 			sort.Slice(variants, func(i, j int) bool {
 				return variants[i].Bitrate > variants[j].Bitrate
 			})
@@ -342,6 +345,16 @@ func (e *TwitterExtractor) buildResult(urlStr string, data *twitterExtractData, 
 			for _, variantInfo := range variants {
 				quality := getQualityLabel(variantInfo.Bitrate)
 				variant := core.NewVideoVariant(quality, variantInfo.URL).WithBitrate(variantInfo.Bitrate)
+				if qualityByURL, resolution := qualityFromVariantURL(variantInfo.URL); qualityByURL != "" {
+					variant = variant.WithResolution(resolution)
+					variant.Quality = qualityByURL
+				}
+				if isHLSVariantURL(variantInfo.URL) {
+					variant = variant.
+						WithFormat("m3u8").
+						WithMime("application/vnd.apple.mpegurl").
+						WithProxy(true)
+				}
 				filename := core.GenerateFilenameWithMeta(filenameSeed, text, authorScreenName, tweetID, "mp4")
 				variant = variant.WithFilename(filename)
 				core.AddVariant(&media, variant)
@@ -766,4 +779,85 @@ func getQualityLabel(bitrate int) string {
 	default:
 		return fmt.Sprintf("%d kbps", bitrate/1000)
 	}
+}
+
+func isHLSVariantURL(rawURL string) bool {
+	if strings.TrimSpace(rawURL) == "" {
+		return false
+	}
+	parsedURL, err := url.Parse(rawURL)
+	if err != nil {
+		return strings.Contains(strings.ToLower(rawURL), ".m3u8")
+	}
+	return strings.Contains(strings.ToLower(parsedURL.Path), ".m3u8")
+}
+
+func filterHLSVariantsWhenProgressiveAudioExists(mediaType string, variants []twitterVariant) []twitterVariant {
+	if len(variants) == 0 || strings.TrimSpace(mediaType) != "video" {
+		return variants
+	}
+
+	hasProgressiveWithAudio := false
+	for _, variant := range variants {
+		if isHLSVariantURL(variant.URL) {
+			continue
+		}
+		if strings.Contains(strings.ToLower(variant.URL), ".mp4") && variant.Bitrate > 0 {
+			hasProgressiveWithAudio = true
+			break
+		}
+	}
+
+	if !hasProgressiveWithAudio {
+		return variants
+	}
+
+	filtered := make([]twitterVariant, 0, len(variants))
+	for _, variant := range variants {
+		if isHLSVariantURL(variant.URL) {
+			continue
+		}
+		filtered = append(filtered, variant)
+	}
+
+	if len(filtered) == 0 {
+		return variants
+	}
+
+	return filtered
+}
+
+func qualityFromVariantURL(rawURL string) (quality string, resolution string) {
+	trimmed := strings.TrimSpace(rawURL)
+	if trimmed == "" {
+		return "", ""
+	}
+
+	parsedURL, err := url.Parse(trimmed)
+	pathValue := trimmed
+	if err == nil {
+		pathValue = parsedURL.Path
+	}
+
+	matches := twitterResolutionRegex.FindStringSubmatch(pathValue)
+	if len(matches) != 3 {
+		return "", ""
+	}
+
+	width, errW := strconv.Atoi(matches[1])
+	height, errH := strconv.Atoi(matches[2])
+	if errW != nil || errH != nil || width <= 0 || height <= 0 {
+		return "", ""
+	}
+
+	resolution = fmt.Sprintf("%dx%d", width, height)
+	quality = fmt.Sprintf("%dp", minInt(width, height))
+	return quality, resolution
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

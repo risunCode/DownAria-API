@@ -93,6 +93,7 @@ The `/api/v1/*` group does not apply origin-protection or anti-bot middleware.
 - File size behavior is mode-aware:
   - Preview/proxy mode (`download=0`): capped at 10 GB (`maxProxyPreviewSizeMB`)
   - Download mode (`download=1`): capped by `MAX_DOWNLOAD_SIZE_MB`
+- HEAD metadata requests are deduplicated with singleflight and cached for `45s`.
 
 ### `GET /api/web/download` and `GET /api/v1/download`
 
@@ -115,6 +116,24 @@ The `/api/v1/*` group does not apply origin-protection or anti-bot middleware.
 - Merge output size is capped by `MAX_MERGE_OUTPUT_SIZE_MB`.
 - Response includes `Content-Disposition: attachment` with resolved output filename.
 - Runtime default is signed `POST /api/web/merge`; public `POST /api/v1/merge` is conditional (only when `WEB_INTERNAL_SHARED_SECRET` is unset).
+- When `CONCURRENT_MERGE_ENABLED=true`, direct pair merges use concurrent download + worker pool execution.
+
+### `GET /api/web/hls-stream` and `GET /api/v1/hls-stream`
+
+- Required query: `url`
+- Optional query: `chunk=1`
+- Behavior:
+  - no `chunk`: playlist path, parse and rewrite variant/segment URLs back to HLS proxy route
+  - `chunk=1`: segment path, direct streaming passthrough
+- Headers:
+  - Playlists: `Cache-Control: no-cache`
+  - Segments: `Cache-Control: public, max-age=86400, immutable`
+  - CORS: `Access-Control-Allow-Origin: *`
+
+### `GET /metrics`
+
+- Exposes text-format Prometheus-compatible content delivery metrics.
+- Includes active download/merge/HLS gauges, operation counters, cache hit counters, and average duration/throughput series.
 
 Examples:
 

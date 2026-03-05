@@ -221,3 +221,20 @@ func TestRouter_MergeV1HiddenWhenWebSecretConfigured(t *testing.T) {
 		t.Fatalf("expected status %d, got %d", http.StatusNotFound, rec.Code)
 	}
 }
+
+func TestRouter_MetricsEndpoint(t *testing.T) {
+	cfg := config.Config{}
+	h := handlers.NewHandler(cfg, time.Now())
+	router := NewRouter(h, cfg)
+
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "downaria_active_downloads") {
+		t.Fatalf("expected metrics body")
+	}
+}

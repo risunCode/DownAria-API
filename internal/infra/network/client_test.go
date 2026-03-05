@@ -29,6 +29,12 @@ func TestNewHTTPClient_TransportConfig(t *testing.T) {
 	if transport.IdleConnTimeout != 90*time.Second {
 		t.Fatalf("IdleConnTimeout=%v, want 90s", transport.IdleConnTimeout)
 	}
+	if transport.TLSHandshakeTimeout != 10*time.Second {
+		t.Fatalf("TLSHandshakeTimeout=%v, want 10s", transport.TLSHandshakeTimeout)
+	}
+	if transport.ResponseHeaderTimeout != 30*time.Second {
+		t.Fatalf("ResponseHeaderTimeout=%v, want 30s", transport.ResponseHeaderTimeout)
+	}
 	if transport.DisableKeepAlives {
 		t.Fatalf("DisableKeepAlives=true, want false")
 	}
@@ -70,4 +76,35 @@ func TestNewHTTPClient_ReusesConnections(t *testing.T) {
 	if got := atomic.LoadInt64(&newConns); got != 1 {
 		t.Fatalf("expected 1 new connection, got %d", got)
 	}
+}
+
+func TestNewHTTPClientWithOptions_AcceptsStreamingRequestTimeoutAndTransportOverrides(t *testing.T) {
+	client := NewHTTPClientWithOptions(HTTPClientOptions{
+		RequestTimeout:        0,
+		DialTimeout:           2 * time.Second,
+		KeepAliveTimeout:      3 * time.Second,
+		TLSHandshakeTimeout:   4 * time.Second,
+		ResponseHeaderTimeout: 5 * time.Second,
+		IdleConnTimeout:       6 * time.Second,
+	})
+
+	if client.Timeout != 0 {
+		t.Fatalf("client.Timeout=%v, want 0", client.Timeout)
+	}
+
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("expected *http.Transport, got %T", client.Transport)
+	}
+
+	if transport.TLSHandshakeTimeout != 4*time.Second {
+		t.Fatalf("TLSHandshakeTimeout=%v, want 4s", transport.TLSHandshakeTimeout)
+	}
+	if transport.ResponseHeaderTimeout != 5*time.Second {
+		t.Fatalf("ResponseHeaderTimeout=%v, want 5s", transport.ResponseHeaderTimeout)
+	}
+	if transport.IdleConnTimeout != 6*time.Second {
+		t.Fatalf("IdleConnTimeout=%v, want 6s", transport.IdleConnTimeout)
+	}
+
 }

@@ -97,8 +97,8 @@ func resolvePlaylistURL(uri string, baseURL *url.URL) string {
 	return baseDir + uri
 }
 
-// isHLSPlaylist checks if content type indicates HLS playlist
-func isHLSPlaylist(contentType string) bool {
+// isHLSContentType checks if content type indicates HLS playlist
+func isHLSContentType(contentType string) bool {
 	ct := strings.ToLower(strings.TrimSpace(contentType))
 	return strings.Contains(ct, "application/vnd.apple.mpegurl") ||
 		strings.Contains(ct, "application/x-mpegurl") ||

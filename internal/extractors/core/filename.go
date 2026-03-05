@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"time"
 	"unicode/utf8"
 )
 
@@ -12,16 +11,13 @@ var (
 	filenameURLRe        = regexp.MustCompile(`(?i)https?://\S+|www\.\S+`)
 	filenameSpaceRe      = regexp.MustCompile(`\s+`)
 	filenamePunctRe      = regexp.MustCompile(`[\[\]\(\){}<>:"'/\\|?*~` + "`" + `,;+=!$%^&@#]`)
-	filenameAllowedRe    = regexp.MustCompile(`[^a-z0-9 _-]`)
+	filenameAllowedRe    = regexp.MustCompile(`[^\p{L}\p{N} _-]`)
 	filenameUnderscoreRe = regexp.MustCompile(`_+`)
 	extAllowedRe         = regexp.MustCompile(`^[a-z0-9]{2,8}$`)
-	filenameNowFunc      = time.Now
 )
 
-const maxFilenameTitleWords = 15
-
-// GenerateFilename creates a standardized filename: author_title_id_[DownAria].ext
-// Format: {author}_{title}_{id}_[DownAria].{extension}
+// GenerateFilename creates a standardized filename: author_title[_index]_[DownAria].ext
+// Format: {author}_{title}_[{index}_][DownAria].{extension}
 func GenerateFilename(author, title, contentID, extension string) string {
 	// Sanitize author
 	author = sanitizeFilenameComponent(author)
@@ -31,53 +27,33 @@ func GenerateFilename(author, title, contentID, extension string) string {
 
 	// Sanitize title (optional)
 	title = sanitizeFilenameComponent(title)
-	title = capFilenameTitleWords(title, maxFilenameTitleWords)
+	if title == "" {
+		title = "media"
+	}
 
-	// Sanitize content ID (optional)
-	contentID = sanitizeFilenameComponent(contentID)
+	indexToken := sanitizeFilenameComponent(contentID)
+	if indexToken == "0" {
+		indexToken = ""
+	}
 
 	// Sanitize extension
 	extension = sanitizeExtension(extension)
 
-	// Build filename: author[_title][_id]_[DownAria].ext
-	parts := []string{author}
-	if title != "" {
-		parts = append(parts, title)
+	// Build filename: author_title[_index]_[DownAria].ext
+	if indexToken != "" {
+		return fmt.Sprintf("%s_%s_%s_[DownAria].%s", author, title, indexToken, extension)
 	}
-	if contentID != "" {
-		parts = append(parts, contentID)
-	}
-	filename := fmt.Sprintf("%s_[DownAria].%s", strings.Join(parts, "_"), extension)
-
-	// Ensure total length doesn't exceed 220 chars (safer across environments)
-	if len(filename) > 220 {
-		filename = truncateFilename(filename, 220)
-	}
+	filename := fmt.Sprintf("%s_%s_[DownAria].%s", author, title, extension)
 
 	return filename
 }
 
-// BuildFilenameID creates stable identifier segment.
-// Preferred format:
-//   - authorID_postID (when both exist)
-//   - authorID_YYYYMMDDHHMMSS (when only authorID exists)
-//   - postID (when only postID exists)
-//   - YYYYMMDDHHMMSS (fallback)
+// BuildFilenameID is kept for backward compatibility.
+// IDs/timestamps are no longer included in generated filenames.
 func BuildFilenameID(authorID, postID string) string {
-	aid := sanitizeFilenameComponent(authorID)
-	pid := sanitizeFilenameComponent(postID)
-	ts := filenameNowFunc().UTC().Format("20060102150405")
-
-	switch {
-	case aid != "" && pid != "":
-		return aid + "_" + pid
-	case aid != "":
-		return aid + "_" + ts
-	case pid != "":
-		return pid
-	default:
-		return ts
-	}
+	_ = authorID
+	_ = postID
+	return ""
 }
 
 // GenerateFilenameWithMeta builds filename using author/title and ID strategy.
@@ -115,12 +91,6 @@ func sanitizeFilenameComponent(s string) string {
 	// Remove leading/trailing underscores
 	s = strings.Trim(s, "_")
 
-	// Keep components reasonably short (UTF-8 safe)
-	if len(s) > 80 {
-		s = truncateUTF8(s, 80)
-		s = strings.Trim(s, "_")
-	}
-
 	return s
 }
 
@@ -131,31 +101,6 @@ func sanitizeExtension(ext string) string {
 		return "bin"
 	}
 	return ext
-}
-
-func capFilenameTitleWords(v string, maxWords int) string {
-	if v == "" || maxWords <= 0 {
-		return ""
-	}
-
-	parts := strings.Split(v, "_")
-	trimmed := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		trimmed = append(trimmed, p)
-		if len(trimmed) >= maxWords {
-			break
-		}
-	}
-
-	if len(trimmed) == 0 {
-		return ""
-	}
-
-	return strings.Join(trimmed, "_")
 }
 
 // truncateFilename safely truncates filename while preserving extension

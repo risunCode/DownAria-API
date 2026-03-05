@@ -1,9 +1,11 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -16,8 +18,22 @@ import (
 	apperrors "downaria-api/internal/core/errors"
 	"downaria-api/internal/core/ports"
 	"downaria-api/internal/extractors/core"
+	mergeinfra "downaria-api/internal/infra/merge"
+	"downaria-api/internal/infra/metrics"
 	"downaria-api/internal/shared/security"
+	"downaria-api/pkg/ffmpeg"
 )
+
+type handlersFakeMergeRunner struct {
+	mergeFn func(ctx context.Context, opts ffmpeg.MergeOptions) (*ffmpeg.FFmpegResult, error)
+}
+
+func (f *handlersFakeMergeRunner) StreamMerge(ctx context.Context, opts ffmpeg.MergeOptions) (*ffmpeg.FFmpegResult, error) {
+	if f.mergeFn != nil {
+		return f.mergeFn(ctx, opts)
+	}
+	return &ffmpeg.FFmpegResult{Stdout: io.NopCloser(bytes.NewReader([]byte("ok")))}, nil
+}
 
 type allowAllPublicResolver struct{}
 
@@ -80,16 +96,26 @@ func (m *mockExtractor) Extract(ctx context.Context, input extraction.ExtractInp
 func newTestHandler() *Handler {
 	return &Handler{
 		config: config.Config{
-			Port:                  "8080",
-			AllowedOrigins:        []string{"http://localhost:3000"},
-			GlobalRateLimitLimit:  60,
-			GlobalRateLimitWindow: time.Minute,
-			GlobalRateLimitRule:   "60/1m0s",
-			UpstreamTimeout:       30 * time.Second,
-			UpstreamTimeoutMS:     30000,
-			MergeEnabled:          true,
-			PublicBaseURL:         "http://localhost:8080",
-			MaxDownloadSizeMB:     100,
+			Port:                            "8080",
+			AllowedOrigins:                  []string{"http://localhost:3000"},
+			GlobalRateLimitLimit:            60,
+			GlobalRateLimitWindow:           time.Minute,
+			GlobalRateLimitRule:             "60/1m0s",
+			UpstreamTimeout:                 30 * time.Second,
+			UpstreamTimeoutMS:               30000,
+			UpstreamConnectTimeout:          3 * time.Second,
+			UpstreamConnectTimeoutMS:        3000,
+			UpstreamTLSHandshakeTimeout:     4 * time.Second,
+			UpstreamTLSHandshakeTimeoutMS:   4000,
+			UpstreamResponseHeaderTimeout:   5 * time.Second,
+			UpstreamResponseHeaderTimeoutMS: 5000,
+			UpstreamIdleConnTimeout:         6 * time.Second,
+			UpstreamIdleConnTimeoutMS:       6000,
+			UpstreamKeepAliveTimeout:        7 * time.Second,
+			UpstreamKeepAliveTimeoutMS:      7000,
+			MergeEnabled:                    true,
+			PublicBaseURL:                   "http://localhost:8080",
+			MaxDownloadSizeMB:               100,
 		},
 		startedAt:  time.Now(),
 		httpClient: &http.Client{},
@@ -98,6 +124,7 @@ func newTestHandler() *Handler {
 		extractor:  &mockExtractor{result: &core.ExtractResult{}},
 		headCache:  nil,
 		urlGuard:   security.NewOutboundURLValidator(allowAllPublicResolver{}),
+		metrics:    metrics.NewContentDeliveryMetrics(),
 	}
 }
 
@@ -165,6 +192,21 @@ func TestSettingsHandler(t *testing.T) {
 
 	if data["upstream_timeout_ms"] != float64(30000) {
 		t.Errorf("expected upstream_timeout_ms 30000, got %v", data["upstream_timeout_ms"])
+	}
+	if data["upstream_connect_timeout_ms"] != float64(3000) {
+		t.Errorf("expected upstream_connect_timeout_ms 3000, got %v", data["upstream_connect_timeout_ms"])
+	}
+	if data["upstream_tls_handshake_timeout_ms"] != float64(4000) {
+		t.Errorf("expected upstream_tls_handshake_timeout_ms 4000, got %v", data["upstream_tls_handshake_timeout_ms"])
+	}
+	if data["upstream_response_header_timeout_ms"] != float64(5000) {
+		t.Errorf("expected upstream_response_header_timeout_ms 5000, got %v", data["upstream_response_header_timeout_ms"])
+	}
+	if data["upstream_idle_conn_timeout_ms"] != float64(6000) {
+		t.Errorf("expected upstream_idle_conn_timeout_ms 6000, got %v", data["upstream_idle_conn_timeout_ms"])
+	}
+	if data["upstream_keepalive_timeout_ms"] != float64(7000) {
+		t.Errorf("expected upstream_keepalive_timeout_ms 7000, got %v", data["upstream_keepalive_timeout_ms"])
 	}
 
 	if data["global_rate_limit_limit"] != float64(60) {
@@ -487,5 +529,89 @@ func TestMergeHandler_Disabled(t *testing.T) {
 
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("expected status %d, got %d", http.StatusForbidden, rr.Code)
+	}
+}
+
+func TestMergeHandler_QueueFullIncludesRetryAfterMetadata(t *testing.T) {
+	h := newTestHandler()
+	h.config.ConcurrentMergeEnabled = true
+	h.mergePool = mergeinfra.NewMergeWorkerPool(1, 0, mergeinfra.NewStreamingMergerWithRunner(&handlersFakeMergeRunner{mergeFn: func(ctx context.Context, opts ffmpeg.MergeOptions) (*ffmpeg.FFmpegResult, error) {
+		time.Sleep(2 * time.Second)
+		return &ffmpeg.FFmpegResult{Stdout: io.NopCloser(bytes.NewReader([]byte("ok")))}, nil
+	}}, 1024*1024))
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = h.mergePool.Shutdown(ctx)
+	}()
+
+	fillJob := func() error {
+		return h.mergePool.Submit(&mergeinfra.MergeJob{
+			Ctx:      t.Context(),
+			Input:    &mergeinfra.MergeInput{VideoURL: "https://example.com/video", AudioURL: "https://example.com/audio"},
+			Output:   io.Discard,
+			ResultCh: make(chan error, 1),
+		})
+	}
+	seeded := false
+	for i := 0; i < 20; i++ {
+		if err := fillJob(); err == nil {
+			seeded = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !seeded {
+		t.Fatalf("failed to seed active merge job")
+	}
+	time.Sleep(20 * time.Millisecond)
+	if err := fillJob(); !errors.Is(err, mergeinfra.ErrWorkerPoolQueueFull) {
+		t.Fatalf("expected queue full when worker is occupied, got %v", err)
+	}
+
+	body := strings.NewReader(`{"videoUrl":"https://example.com/video","audioUrl":"https://example.com/audio"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/merge", body)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	h.Merge(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected status %d, got %d", http.StatusServiceUnavailable, rr.Code)
+	}
+	if rr.Header().Get("Retry-After") == "" {
+		t.Fatalf("expected Retry-After header")
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+	errResp := payload["error"].(map[string]any)
+	metadata := errResp["metadata"].(map[string]any)
+	if metadata["retryAfter"] == nil || metadata["resetAt"] == nil {
+		t.Fatalf("expected retry metadata")
+	}
+	if metadata["queueDepth"] == nil || metadata["queueCapacity"] == nil {
+		t.Fatalf("expected queue metadata")
+	}
+}
+
+func TestWriteFFmpegResultAsAttachment_StreamsWithoutTempBufferingContract(t *testing.T) {
+	rr := httptest.NewRecorder()
+	result := &ffmpeg.FFmpegResult{Stdout: io.NopCloser(bytes.NewReader([]byte("merged")))}
+
+	written, err := writeFFmpegResultAsAttachment(rr, result, "sample.mp4", "video/mp4", 1024)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if written != int64(len("merged")) {
+		t.Fatalf("expected %d bytes written, got %d", len("merged"), written)
+	}
+	if rr.Body.String() != "merged" {
+		t.Fatalf("unexpected body: %q", rr.Body.String())
+	}
+	if rr.Header().Get("Content-Length") != "" {
+		t.Fatalf("expected no pre-buffered Content-Length header")
 	}
 }

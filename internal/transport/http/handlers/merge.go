@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"net/url"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -18,6 +18,7 @@ import (
 
 	apperrors "downaria-api/internal/core/errors"
 	extractorcore "downaria-api/internal/extractors/core"
+	mergeinfra "downaria-api/internal/infra/merge"
 	"downaria-api/internal/shared/util"
 	"downaria-api/internal/transport/http/middleware"
 	"downaria-api/pkg/ffmpeg"
@@ -98,12 +99,6 @@ func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
 		targetURL = validatedTargetURL
 	}
 
-	ff := ffmpeg.New()
-	if ff == nil {
-		_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeFFmpegUnavailable), apperrors.CodeFFmpegUnavailable, apperrors.Message(apperrors.CodeFFmpegUnavailable))
-		return
-	}
-
 	if usesDirectPair {
 		validatedVideoURL, validateVideoErr := h.sanitizeAndValidateOutboundURL(r.Context(), videoURL)
 		if validateVideoErr != nil {
@@ -120,8 +115,99 @@ func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
 		}
 
 		mergeHeaders := buildMergeHeaders(validatedVideoURL, requestID)
+		if h.config.ConcurrentMergeEnabled {
+			if h.mergePool == nil {
+				_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeMergeFailed), apperrors.CodeMergeFailed, "merge worker pool unavailable")
+				return
+			}
+			if (isHLSPlaylist(validatedVideoURL, "") || isHLSPlaylist(validatedAudioURL, "")) && !h.config.HLSMergeEnabled {
+				_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeMergeFailed), apperrors.CodeMergeFailed, "hls merge is disabled")
+				return
+			}
+			h.metrics.SetMergeQueueCapacity(h.mergePool.QueueCapacity())
+			h.metrics.SetMergeQueueDepth(h.mergePool.QueueDepth())
+
+			filename := ensureFileExtension(req.Filename, "mp4")
+			queueStarted := make(chan time.Time, 1)
+			countedOutput := &countingWriter{Writer: w}
+			resultCh := make(chan error, 1)
+			job := &mergeinfra.MergeJob{
+				Ctx: r.Context(),
+				Input: &mergeinfra.MergeInput{
+					VideoURL:  validatedVideoURL,
+					AudioURL:  validatedAudioURL,
+					UserAgent: resolveUserAgent(req.UserAgent),
+					Headers:   mergeHeaders,
+				},
+				Output: countedOutput,
+				OnStart: func(wait time.Duration) {
+					startedAt := time.Now()
+					h.metrics.IncActiveMerges()
+					h.metrics.SetMergeQueueDepth(h.mergePool.QueueDepth())
+					h.metrics.ObserveMergeQueueWait(wait)
+					writeMergeAttachmentHeaders(w, filename, "video/mp4")
+					select {
+					case queueStarted <- startedAt:
+					default:
+					}
+				},
+				ResultCh: resultCh,
+			}
+			if err := h.mergePool.Submit(job); err != nil {
+				h.metrics.SetMergeQueueDepth(h.mergePool.QueueDepth())
+				if errors.Is(err, mergeinfra.ErrWorkerPoolQueueFull) {
+					retryAfterDuration := h.mergePool.EstimateRetryAfter()
+					retryAfterSeconds, resetAt := buildRetryAfterMetadata(retryAfterDuration)
+					w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds))
+					_ = builder.WriteErrorWithDetails(w,
+						apperrors.HTTPStatus(apperrors.CodeWorkerPoolFull),
+						apperrors.CodeWorkerPoolFull,
+						apperrors.Message(apperrors.CodeWorkerPoolFull),
+						string(apperrors.CategoryRateLimit),
+						map[string]any{
+							"retryAfter":    retryAfterSeconds,
+							"resetAt":       resetAt,
+							"queueDepth":    h.mergePool.QueueDepth(),
+							"queueCapacity": h.mergePool.QueueCapacity(),
+						},
+					)
+					return
+				}
+				_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeMergeFailed), apperrors.CodeMergeFailed, "failed to enqueue merge job")
+				return
+			}
+			h.metrics.SetMergeQueueDepth(h.mergePool.QueueDepth())
+			if err := <-resultCh; err != nil {
+				select {
+				case <-queueStarted:
+					h.metrics.DecActiveMerges()
+				default:
+				}
+				h.metrics.AddFailure()
+				h.observeCancellationMetric(r.Context(), err)
+				if errors.Is(err, mergeinfra.ErrOutputLimitExceeded) || errors.Is(err, errMergeOutputExceeded) {
+					_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeFileTooLarge), apperrors.CodeFileTooLarge, fmt.Sprintf("merged output exceeds maximum %d MB", h.config.MaxMergeOutputSizeMB))
+					return
+				}
+				_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeMergeFailed), apperrors.CodeMergeFailed, "failed to finalize merged output")
+				return
+			}
+			select {
+			case startedAt := <-queueStarted:
+				h.metrics.DecActiveMerges()
+				h.metrics.AddMerge(countedOutput.Written(), time.Since(startedAt))
+			default:
+			}
+			return
+		}
+
 		ffmpegCtx, cancelFFmpeg := withCommandTimeout(r.Context(), 4*time.Minute)
 		defer cancelFFmpeg()
+		ff := ffmpeg.New()
+		if ff == nil {
+			_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeFFmpegUnavailable), apperrors.CodeFFmpegUnavailable, apperrors.Message(apperrors.CodeFFmpegUnavailable))
+			return
+		}
 
 		result, err := ff.StreamMerge(ffmpegCtx, ffmpeg.MergeOptions{
 			VideoURL:  validatedVideoURL,
@@ -138,7 +224,13 @@ func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
 
 		filename := ensureFileExtension(req.Filename, "mp4")
 		maxOutputBytes := int64(h.config.MaxMergeOutputSizeMB) * 1024 * 1024
-		if err := writeFFmpegResultAsAttachment(w, result, filename, "video/mp4", maxOutputBytes); err != nil {
+		h.metrics.IncActiveMerges()
+		start := time.Now()
+		written, err := writeFFmpegResultAsAttachment(w, result, filename, "video/mp4", maxOutputBytes)
+		h.metrics.DecActiveMerges()
+		if err != nil {
+			h.metrics.AddFailure()
+			h.observeCancellationMetric(r.Context(), err)
 			if errors.Is(err, errMergeOutputExceeded) {
 				_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeFileTooLarge), apperrors.CodeFileTooLarge, fmt.Sprintf("merged output exceeds maximum %d MB", h.config.MaxMergeOutputSizeMB))
 				return
@@ -151,6 +243,7 @@ func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
 			_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeMergeFailed), apperrors.CodeMergeFailed, "failed to finalize merged output")
 			return
 		}
+		h.metrics.AddMerge(written, time.Since(start))
 		return
 	}
 
@@ -206,6 +299,11 @@ func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
 
 		ffmpegCtx, cancelFFmpeg := withCommandTimeout(r.Context(), 4*time.Minute)
 		defer cancelFFmpeg()
+		ff := ffmpeg.New()
+		if ff == nil {
+			_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeFFmpegUnavailable), apperrors.CodeFFmpegUnavailable, apperrors.Message(apperrors.CodeFFmpegUnavailable))
+			return
+		}
 		result, err := ff.StreamExtractAudio(ffmpegCtx, ffmpeg.AudioExtractOptions{
 			InputURL:   inputURL,
 			OutputExt:  audioFormat,
@@ -222,7 +320,13 @@ func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
 
 		filename := ensureFileExtension(req.Filename, audioFormat)
 		maxOutputBytes := int64(h.config.MaxMergeOutputSizeMB) * 1024 * 1024
-		if err := writeFFmpegResultAsAttachment(w, result, filename, contentType, maxOutputBytes); err != nil {
+		h.metrics.IncActiveMerges()
+		start := time.Now()
+		written, err := writeFFmpegResultAsAttachment(w, result, filename, contentType, maxOutputBytes)
+		h.metrics.DecActiveMerges()
+		if err != nil {
+			h.metrics.AddFailure()
+			h.observeCancellationMetric(r.Context(), err)
 			if errors.Is(err, errMergeOutputExceeded) {
 				_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeFileTooLarge), apperrors.CodeFileTooLarge, fmt.Sprintf("merged output exceeds maximum %d MB", h.config.MaxMergeOutputSizeMB))
 				return
@@ -235,6 +339,7 @@ func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
 			_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeMergeFailed), apperrors.CodeMergeFailed, "failed to finalize audio output")
 			return
 		}
+		h.metrics.AddMerge(written, time.Since(start))
 		return
 	}
 
@@ -288,6 +393,11 @@ func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
 
 	ffmpegCtx, cancelFFmpeg := withCommandTimeout(r.Context(), 4*time.Minute)
 	defer cancelFFmpeg()
+	ff := ffmpeg.New()
+	if ff == nil {
+		_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeFFmpegUnavailable), apperrors.CodeFFmpegUnavailable, apperrors.Message(apperrors.CodeFFmpegUnavailable))
+		return
+	}
 	result, err := ff.StreamMerge(ffmpegCtx, ffmpeg.MergeOptions{
 		VideoURL:  validatedVideoURL,
 		AudioURL:  validatedAudioURL,
@@ -303,7 +413,13 @@ func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
 
 	filename := ensureFileExtension(req.Filename, "mp4")
 	maxOutputBytes := int64(h.config.MaxMergeOutputSizeMB) * 1024 * 1024
-	if err := writeFFmpegResultAsAttachment(w, result, filename, "video/mp4", maxOutputBytes); err != nil {
+	h.metrics.IncActiveMerges()
+	start := time.Now()
+	written, err := writeFFmpegResultAsAttachment(w, result, filename, "video/mp4", maxOutputBytes)
+	h.metrics.DecActiveMerges()
+	if err != nil {
+		h.metrics.AddFailure()
+		h.observeCancellationMetric(r.Context(), err)
 		if errors.Is(err, errMergeOutputExceeded) {
 			_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeFileTooLarge), apperrors.CodeFileTooLarge, fmt.Sprintf("merged output exceeds maximum %d MB", h.config.MaxMergeOutputSizeMB))
 			return
@@ -316,6 +432,7 @@ func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
 		_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeMergeFailed), apperrors.CodeMergeFailed, "failed to finalize merged output")
 		return
 	}
+	h.metrics.AddMerge(written, time.Since(start))
 }
 
 func withCommandTimeout(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
@@ -334,60 +451,81 @@ func withCommandTimeout(parent context.Context, timeout time.Duration) (context.
 var errMergeOutputExceeded = errors.New("merge output exceeds configured limit")
 var errMergeResponseWriteFailed = errors.New("failed to write merge response")
 
-func writeFFmpegResultAsAttachment(w http.ResponseWriter, result *ffmpeg.FFmpegResult, filename, contentType string, maxOutputBytes int64) error {
-	if result == nil || result.Stdout == nil {
-		return fmt.Errorf("missing ffmpeg output stream")
-	}
-	if maxOutputBytes <= 0 {
-		return fmt.Errorf("invalid max output size")
-	}
-
-	tmpFile, err := os.CreateTemp("", "downaria-merge-*")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmpFile.Name()
-	defer os.Remove(tmpPath)
-
-	written, err := io.Copy(tmpFile, io.LimitReader(result.Stdout, maxOutputBytes+1))
-	if err != nil {
-		_ = tmpFile.Close()
-		return err
-	}
-
-	if written > maxOutputBytes {
-		_ = tmpFile.Close()
-		_ = result.Close()
-		return errMergeOutputExceeded
-	}
-
-	if err := result.Wait(); err != nil {
-		_ = tmpFile.Close()
-		return err
-	}
-
-	if _, err := tmpFile.Seek(0, io.SeekStart); err != nil {
-		_ = tmpFile.Close()
-		return err
-	}
-
-	info, err := tmpFile.Stat()
-	if err != nil {
-		_ = tmpFile.Close()
-		return err
-	}
-
+func writeMergeAttachmentHeaders(w http.ResponseWriter, filename, contentType string) {
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
+}
 
-	if _, err := io.Copy(w, tmpFile); err != nil {
-		_ = tmpFile.Close()
-		return fmt.Errorf("%w: %v", errMergeResponseWriteFailed, err)
+func writeFFmpegResultAsAttachment(w http.ResponseWriter, result *ffmpeg.FFmpegResult, filename, contentType string, maxOutputBytes int64) (int64, error) {
+	if result == nil || result.Stdout == nil {
+		return 0, fmt.Errorf("missing ffmpeg output stream")
+	}
+	if maxOutputBytes <= 0 {
+		return 0, fmt.Errorf("invalid max output size")
+	}
+	writeMergeAttachmentHeaders(w, filename, contentType)
+
+	written, err := io.Copy(w, io.LimitReader(result.Stdout, maxOutputBytes+1))
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return written, err
+		}
+		return written, fmt.Errorf("%w: %v", errMergeResponseWriteFailed, err)
 	}
 
-	return tmpFile.Close()
+	if written > maxOutputBytes {
+		_ = result.Close()
+		_ = result.Wait()
+		return written, errMergeOutputExceeded
+	}
+
+	if err := result.Wait(); err != nil {
+		return written, err
+	}
+	return written, nil
+}
+
+type countingWriter struct {
+	io.Writer
+	written int64
+}
+
+func (cw *countingWriter) Write(p []byte) (int, error) {
+	n, err := cw.Writer.Write(p)
+	cw.written += int64(n)
+	return n, err
+}
+
+func (cw *countingWriter) Written() int64 {
+	if cw == nil {
+		return 0
+	}
+	return cw.written
+}
+
+func buildRetryAfterMetadata(d time.Duration) (retryAfter int, resetAt string) {
+	if d <= 0 {
+		d = time.Second
+	}
+	retryAfter = int(math.Ceil(d.Seconds()))
+	if retryAfter < 1 {
+		retryAfter = 1
+	}
+	return retryAfter, time.Now().UTC().Add(time.Duration(retryAfter) * time.Second).Format(time.RFC3339)
+}
+
+func (h *Handler) observeCancellationMetric(ctx context.Context, err error) {
+	if h == nil || h.metrics == nil {
+		return
+	}
+	if errors.Is(err, context.Canceled) || (ctx != nil && errors.Is(ctx.Err(), context.Canceled)) {
+		h.metrics.AddCancellation("context_canceled")
+		return
+	}
+	if errors.Is(err, context.DeadlineExceeded) || (ctx != nil && errors.Is(ctx.Err(), context.DeadlineExceeded)) {
+		h.metrics.AddCancellation("deadline_exceeded")
+	}
 }
 
 func resolveUserAgent(ua string) string {

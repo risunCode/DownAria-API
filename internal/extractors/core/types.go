@@ -47,7 +47,7 @@ type Variant struct {
 	RequiresMerge bool   `json:"requiresMerge,omitempty"` // Whether video needs audio merge
 	RequiresProxy bool   `json:"requiresProxy,omitempty"` // Whether URL needs proxying
 	FormatID      string `json:"formatId,omitempty"`      // Internal format identifier
-	Filename      string `json:"filename,omitempty"`      // Suggested filename (author_title_id_[DownAria].ext)
+	Filename      string `json:"filename,omitempty"`      // Suggested filename (author_title_[DownAria].ext)
 }
 
 // Media represents a media item with multiple variants

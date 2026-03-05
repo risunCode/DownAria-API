@@ -10,26 +10,29 @@ const (
 	CodeExtractionFailed = "EXTRACTION_FAILED"
 	CodeNetworkError     = "NETWORK_ERROR"
 
-	CodeInvalidJSON         = "INVALID_JSON"
-	CodeInvalidURL          = "INVALID_URL"
-	CodeUnsupportedPlatform = "UNSUPPORTED_PLATFORM"
-	CodeInvalidSource       = "INVALID_SOURCE"
-	CodeNoMediaFound        = "NO_MEDIA_FOUND"
-	CodeUpstreamTimeout     = "UPSTREAM_TIMEOUT"
-	CodeUpstreamRateLimited = "UPSTREAM_RATE_LIMITED"
-	CodeUpstreamForbidden   = "UPSTREAM_FORBIDDEN"
-	CodeUpstreamError       = "UPSTREAM_ERROR"
-	CodeMethodNotAllowed    = "METHOD_NOT_ALLOWED"
-	CodeNotFound            = "NOT_FOUND"
-	CodeRateLimited         = "RATE_LIMITED"
-	CodeOriginNotAllowed    = "ORIGIN_NOT_ALLOWED"
-	CodeAccessDenied        = "ACCESS_DENIED"
-	CodeMergeFailed         = "MERGE_FAILED"
-	CodeFFmpegUnavailable   = "FFMPEG_UNAVAILABLE"
-	CodeMissingParams       = "MISSING_PARAMS"
-	CodeProxyFailed         = "PROXY_FAILED"
-	CodeFileTooLarge        = "FILE_TOO_LARGE"
-	CodeLoginRequired       = "LOGIN_REQUIRED"
+	CodeInvalidJSON            = "INVALID_JSON"
+	CodeInvalidURL             = "INVALID_URL"
+	CodeUnsupportedPlatform    = "UNSUPPORTED_PLATFORM"
+	CodeInvalidSource          = "INVALID_SOURCE"
+	CodeNoMediaFound           = "NO_MEDIA_FOUND"
+	CodeUpstreamTimeout        = "UPSTREAM_TIMEOUT"
+	CodeUpstreamRateLimited    = "UPSTREAM_RATE_LIMITED"
+	CodeUpstreamForbidden      = "UPSTREAM_FORBIDDEN"
+	CodeUpstreamError          = "UPSTREAM_ERROR"
+	CodeMethodNotAllowed       = "METHOD_NOT_ALLOWED"
+	CodeNotFound               = "NOT_FOUND"
+	CodeRateLimited            = "RATE_LIMITED"
+	CodeOriginNotAllowed       = "ORIGIN_NOT_ALLOWED"
+	CodeAccessDenied           = "ACCESS_DENIED"
+	CodeMergeFailed            = "MERGE_FAILED"
+	CodeFFmpegUnavailable      = "FFMPEG_UNAVAILABLE"
+	CodeMissingParams          = "MISSING_PARAMS"
+	CodeProxyFailed            = "PROXY_FAILED"
+	CodeFileTooLarge           = "FILE_TOO_LARGE"
+	CodeLoginRequired          = "LOGIN_REQUIRED"
+	CodeHLSPlaylistParseFailed = "HLS_PLAYLIST_PARSE_FAILED"
+	CodeHLSSegmentFetchFailed  = "HLS_SEGMENT_FETCH_FAILED"
+	CodeWorkerPoolFull         = "WORKER_POOL_FULL"
 )
 
 func Message(code string) string {
@@ -86,6 +89,12 @@ func Message(code string) string {
 		return "file exceeds maximum allowed size"
 	case CodeLoginRequired:
 		return "This content requires authentication. Please provide a cookie in Settings > Cookies to access private, age-restricted, or login-required content."
+	case CodeHLSPlaylistParseFailed:
+		return "failed to parse HLS playlist"
+	case CodeHLSSegmentFetchFailed:
+		return "failed to fetch HLS segment"
+	case CodeWorkerPoolFull:
+		return "worker pool queue is full"
 	default:
 		return "request failed"
 	}
@@ -129,6 +138,12 @@ func HTTPStatus(code string) int {
 		return http.StatusBadGateway
 	case CodeMergeFailed:
 		return http.StatusInternalServerError
+	case CodeWorkerPoolFull:
+		return http.StatusServiceUnavailable
+	case CodeHLSPlaylistParseFailed:
+		return http.StatusBadGateway
+	case CodeHLSSegmentFetchFailed:
+		return http.StatusBadGateway
 	default:
 		return http.StatusInternalServerError
 	}

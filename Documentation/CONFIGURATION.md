@@ -41,6 +41,29 @@ For local dev alignment with the current DownAria frontend runtime, use FE `http
 | `MAX_DOWNLOAD_SIZE_MB` | `1024` | Max download-mode size for proxy/download handlers. Preview/proxy mode uses a larger internal ceiling. |
 | `MAX_MERGE_OUTPUT_SIZE_MB` | `512` | Max output stream size for merge/audio-conversion responses. |
 
+## Content delivery optimization flags
+
+| Variable | Default | Notes |
+|---|---|---|
+| `STREAMING_DOWNLOAD_ENABLED` | `true` | Enables buffered concurrent upstream->client streaming path. |
+| `CONCURRENT_MERGE_ENABLED` | `false` | Enables concurrent downloader + merge worker pool path for direct pair merges. |
+| `HLS_STREAMING_ENABLED` | `true` | Enables HLS playlist/segment optimized route behavior. |
+| `HLS_MERGE_ENABLED` | `true` | Enables HLS playlist segment concatenation flow for merge inputs. |
+| `MERGE_WORKER_COUNT` | `3` | Worker pool concurrency for merge jobs. |
+| `HLS_SEGMENT_WORKER_COUNT` | `5` | Worker pool concurrency for HLS segment fetching. |
+| `HLS_SEGMENT_MAX_RETRIES` | `3` | Retry attempts for failed HLS segment fetches. |
+| `BUFFER_SIZE_VIDEO` | `262144` | Preferred video stream buffer size in bytes (256 KB). |
+| `BUFFER_SIZE_AUDIO` | `65536` | Preferred audio stream buffer size in bytes (64 KB). |
+
+## Gradual rollout controls
+
+| Variable | Default | Notes |
+|---|---|---|
+| `FEATURE_STREAMING_DOWNLOAD_ROLLOUT` | `100` | Percent rollout for streaming download feature gate. |
+| `FEATURE_CONCURRENT_MERGE_ROLLOUT` | `100` | Percent rollout for concurrent merge gate. |
+| `FEATURE_HLS_STREAMING_ROLLOUT` | `100` | Percent rollout for HLS streaming gate. |
+| `FEATURE_HLS_MERGE_ROLLOUT` | `100` | Percent rollout for HLS merge gate. |
+
 ## Stats persistence and buffering
 
 | Variable | Default | Notes |
@@ -95,4 +118,19 @@ STATS_PERSIST_ENABLED=true
 STATS_PERSIST_FILE_PATH=./data/public_stats.json
 STATS_PERSIST_FLUSH_INTERVAL_MS=5000
 STATS_PERSIST_FLUSH_THRESHOLD=10
+
+STREAMING_DOWNLOAD_ENABLED=true
+CONCURRENT_MERGE_ENABLED=false
+HLS_STREAMING_ENABLED=true
+HLS_MERGE_ENABLED=true
+MERGE_WORKER_COUNT=3
+HLS_SEGMENT_WORKER_COUNT=5
+HLS_SEGMENT_MAX_RETRIES=3
+BUFFER_SIZE_VIDEO=262144
+BUFFER_SIZE_AUDIO=65536
+
+FEATURE_STREAMING_DOWNLOAD_ROLLOUT=100
+FEATURE_CONCURRENT_MERGE_ROLLOUT=100
+FEATURE_HLS_STREAMING_ROLLOUT=100
+FEATURE_HLS_MERGE_ROLLOUT=100
 ```

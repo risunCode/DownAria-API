@@ -11,10 +11,13 @@ import (
 
 // Sentinel errors for common validation cases
 var (
-	ErrInvalidURL          = stdErrors.New("invalid url")
-	ErrUnsupportedPlatform = stdErrors.New("unsupported platform")
-	ErrMissingHost         = stdErrors.New("missing host")
-	ErrUnsupportedScheme   = stdErrors.New("unsupported scheme")
+	ErrInvalidURL             = stdErrors.New("invalid url")
+	ErrUnsupportedPlatform    = stdErrors.New("unsupported platform")
+	ErrMissingHost            = stdErrors.New("missing host")
+	ErrUnsupportedScheme      = stdErrors.New("unsupported scheme")
+	ErrHLSPlaylistParseFailed = stdErrors.New("hls playlist parse failed")
+	ErrHLSSegmentFetchFailed  = stdErrors.New("hls segment fetch failed")
+	ErrWorkerPoolFull         = stdErrors.New("worker pool queue is full")
 )
 
 type ErrorCategory string
@@ -155,6 +158,16 @@ func CategorizeError(err error) *AppError {
 			Message:  Message(CodePlatformNotFound),
 			err:      err,
 		}
+	}
+
+	if stdErrors.Is(err, ErrHLSPlaylistParseFailed) {
+		return &AppError{Category: CategoryNetwork, Code: CodeHLSPlaylistParseFailed, Message: Message(CodeHLSPlaylistParseFailed), err: err}
+	}
+	if stdErrors.Is(err, ErrHLSSegmentFetchFailed) {
+		return &AppError{Category: CategoryNetwork, Code: CodeHLSSegmentFetchFailed, Message: Message(CodeHLSSegmentFetchFailed), err: err}
+	}
+	if stdErrors.Is(err, ErrWorkerPoolFull) {
+		return &AppError{Category: CategoryRateLimit, Code: CodeWorkerPoolFull, Message: Message(CodeWorkerPoolFull), err: err}
 	}
 
 	// Fallback to string matching for external errors

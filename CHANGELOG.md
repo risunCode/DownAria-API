@@ -3,6 +3,17 @@
 All notable changes to **DownAria-API** are documented in this file.
 This format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.2.1] - 2026-03-06
+
+### Changed
+- Twitter native extractor now removes HLS (`.m3u8`) variants when progressive MP4-with-audio variants already exist for the same media item, while keeping HLS as fallback when no progressive audio-capable variant is available.
+- Extraction response filename normalization now enforces unified naming per variant with sequence-aware index behavior.
+
+### Fixed
+- Prevented duplicate filename collisions in `variants[].filename` by using deterministic index suffix rules (`index 0` hidden, subsequent entries use `_<n>_`).
+- Removed `unknown_*` style naming outcomes by improving author/title seed selection and Unicode-safe sanitization for mixed-language creator names/descriptions.
+- Stopped embedding raw post IDs/timestamps in generated filenames for extractor output.
+
 ## [1.2.0] - 2026-03-05
 
 ### Added
@@ -13,17 +24,43 @@ This format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Cookie file support for YouTube authentication via yt-dlp
 - Netscape cookie format parser for proper YouTube authentication handling
 - Cookie parameter support in merge endpoint for authenticated video processing
+- **HLS streaming support** with playlist and segment proxy capabilities (`/api/v1/hls-stream`, `/api/web/hls-stream`)
+- **HLS merge support** for downloading and concatenating HLS segments into single files
+- HLS playlist parser using `github.com/grafov/m3u8` library for master and media playlist handling
+- HLS URL rewriter for proxying playlists and segments through DownAria infrastructure
+- Concurrent segment downloader with configurable worker pool (5-10 workers) and retry logic
+- Streaming downloader with buffer pool for memory-efficient large file transfers
+- Pipeline infrastructure for chaining download and merge operations
+- Optimized HTTP client with connection pooling and configurable timeouts
+- Buffer pool for reusable byte buffers to reduce GC pressure
+- HEAD request deduplicator using singleflight pattern to prevent duplicate metadata fetches
+- Metrics system tracking downloads, streams, cache hits, active connections, and bandwidth
+- Metrics endpoint (`/metrics`) exposing Prometheus-compatible statistics
+- Feature flag middleware with percentage-based rollout support for gradual feature deployment
+- FFmpeg merge infrastructure with progress tracking and error handling
+- Comprehensive error code documentation (`Documentation/ERROR_CODES.md`)
+- Integration tests for content delivery optimization flows
+- Configuration options: `HLS_STREAMING_ENABLED`, `HLS_STREAMING_ROLLOUT`, `HLS_MERGE_ENABLED`, `HLS_SEGMENT_MAX_RETRIES`, `HLS_WORKER_POOL_SIZE`
 
 ### Changed
 - Migrated all logging from `log.Printf` to structured `log/slog` with proper severity levels
 - HTTP request logs now use JSON format with structured attributes for better log aggregation
 - Health check endpoint now returns detailed system information including dependency status
 - YouTube extraction now uses temporary cookie files instead of HTTP headers for authentication
+- Proxy handler now uses streaming downloader for improved memory efficiency on large files
+- Merge handler refactored to use new merge infrastructure with better error handling
+- Network client architecture improved with separate optimized client for high-throughput scenarios
+- Router updated with feature-gated HLS routes and metrics endpoint
+- Documentation updated to reflect new HLS capabilities and content delivery optimizations
 
 ### Fixed
 - **Critical:** HTTP request logs now show correct severity levels based on status code (info for 2xx/3xx, warn for 4xx, error for 5xx) instead of always showing "error"
 - **Critical:** YouTube authentication now works correctly with user-provided cookies (previously failed with AUTH_REQUIRED error)
+- **Critical:** HLS master playlist rewriter now correctly handles shared Alternative renditions (audio/subtitle tracks) to prevent recursive proxy URL generation
 - Improved observability and monitoring capabilities with proper log severity classification
+- Memory efficiency improved for large file downloads through streaming and buffer pooling
+- Reduced duplicate HEAD requests through deduplication layer
+- HLS alternative renditions (audio/subtitle tracks) are now rewritten only once even when shared across multiple video quality variants
 
 ## [1.1.1] - 2026-03-04
 

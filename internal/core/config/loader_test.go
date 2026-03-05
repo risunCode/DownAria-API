@@ -100,3 +100,80 @@ func TestLoad_ServerHardeningDefaults(t *testing.T) {
 		t.Fatalf("expected max header bytes=1MiB, got %d", cfg.ServerMaxHeaderBytes)
 	}
 }
+
+func TestLoad_ContentDeliveryFlags(t *testing.T) {
+	t.Setenv("STREAMING_DOWNLOAD_ENABLED", "true")
+	t.Setenv("CONCURRENT_MERGE_ENABLED", "true")
+	t.Setenv("HLS_STREAMING_ENABLED", "true")
+	t.Setenv("HLS_MERGE_ENABLED", "false")
+	t.Setenv("MERGE_WORKER_COUNT", "4")
+	t.Setenv("HLS_SEGMENT_WORKER_COUNT", "8")
+	t.Setenv("HLS_SEGMENT_MAX_RETRIES", "2")
+	t.Setenv("BUFFER_SIZE_VIDEO", "262144")
+	t.Setenv("BUFFER_SIZE_AUDIO", "65536")
+
+	cfg := Load()
+	if !cfg.StreamingDownloadEnabled || !cfg.ConcurrentMergeEnabled || !cfg.HLSStreamingEnabled || cfg.HLSMergeEnabled {
+		t.Fatalf("unexpected feature flags state")
+	}
+	if cfg.MergeWorkerCount != 4 || cfg.HLSSegmentWorkerCount != 8 || cfg.HLSSegmentMaxRetries != 2 {
+		t.Fatalf("unexpected worker settings")
+	}
+}
+
+func TestLoad_UpstreamTransportTimeouts_DefaultFromUpstreamTimeout(t *testing.T) {
+	t.Setenv("UPSTREAM_TIMEOUT_MS", "7000")
+	t.Setenv("UPSTREAM_CONNECT_TIMEOUT_MS", "")
+	t.Setenv("UPSTREAM_TLS_HANDSHAKE_TIMEOUT_MS", "")
+	t.Setenv("UPSTREAM_RESPONSE_HEADER_TIMEOUT_MS", "")
+	t.Setenv("UPSTREAM_IDLE_CONN_TIMEOUT_MS", "")
+	t.Setenv("UPSTREAM_KEEPALIVE_TIMEOUT_MS", "")
+
+	cfg := Load()
+
+	if cfg.UpstreamTimeout != 7*time.Second {
+		t.Fatalf("expected upstream timeout=7s, got %s", cfg.UpstreamTimeout)
+	}
+	if cfg.UpstreamConnectTimeout != 7*time.Second {
+		t.Fatalf("expected connect timeout=7s, got %s", cfg.UpstreamConnectTimeout)
+	}
+	if cfg.UpstreamTLSHandshakeTimeout != 7*time.Second {
+		t.Fatalf("expected tls handshake timeout=7s, got %s", cfg.UpstreamTLSHandshakeTimeout)
+	}
+	if cfg.UpstreamResponseHeaderTimeout != 7*time.Second {
+		t.Fatalf("expected response header timeout=7s, got %s", cfg.UpstreamResponseHeaderTimeout)
+	}
+	if cfg.UpstreamIdleConnTimeout != 90*time.Second {
+		t.Fatalf("expected idle conn timeout=90s, got %s", cfg.UpstreamIdleConnTimeout)
+	}
+	if cfg.UpstreamKeepAliveTimeout != 30*time.Second {
+		t.Fatalf("expected keepalive timeout=30s, got %s", cfg.UpstreamKeepAliveTimeout)
+	}
+}
+
+func TestLoad_UpstreamTransportTimeouts_Overrides(t *testing.T) {
+	t.Setenv("UPSTREAM_TIMEOUT_MS", "10000")
+	t.Setenv("UPSTREAM_CONNECT_TIMEOUT_MS", "1500")
+	t.Setenv("UPSTREAM_TLS_HANDSHAKE_TIMEOUT_MS", "2000")
+	t.Setenv("UPSTREAM_RESPONSE_HEADER_TIMEOUT_MS", "2500")
+	t.Setenv("UPSTREAM_IDLE_CONN_TIMEOUT_MS", "3000")
+	t.Setenv("UPSTREAM_KEEPALIVE_TIMEOUT_MS", "3500")
+
+	cfg := Load()
+
+	if cfg.UpstreamConnectTimeoutMS != 1500 {
+		t.Fatalf("expected connect timeout ms=1500, got %d", cfg.UpstreamConnectTimeoutMS)
+	}
+	if cfg.UpstreamTLSHandshakeTimeoutMS != 2000 {
+		t.Fatalf("expected tls handshake timeout ms=2000, got %d", cfg.UpstreamTLSHandshakeTimeoutMS)
+	}
+	if cfg.UpstreamResponseHeaderTimeoutMS != 2500 {
+		t.Fatalf("expected response header timeout ms=2500, got %d", cfg.UpstreamResponseHeaderTimeoutMS)
+	}
+	if cfg.UpstreamIdleConnTimeoutMS != 3000 {
+		t.Fatalf("expected idle conn timeout ms=3000, got %d", cfg.UpstreamIdleConnTimeoutMS)
+	}
+	if cfg.UpstreamKeepAliveTimeoutMS != 3500 {
+		t.Fatalf("expected keepalive timeout ms=3500, got %d", cfg.UpstreamKeepAliveTimeoutMS)
+	}
+}

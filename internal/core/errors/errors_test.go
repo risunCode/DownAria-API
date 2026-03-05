@@ -164,3 +164,15 @@ func TestCategorizeError_ContextTimeoutWrapped(t *testing.T) {
 		t.Fatalf("expected code %q, got %q", CodeTimeout, categorized.Code)
 	}
 }
+
+func TestCategorizeError_HLSErrors(t *testing.T) {
+	if got := CategorizeError(ErrHLSPlaylistParseFailed); got.Code != CodeHLSPlaylistParseFailed {
+		t.Fatalf("expected %s, got %s", CodeHLSPlaylistParseFailed, got.Code)
+	}
+	if got := CategorizeError(ErrHLSSegmentFetchFailed); got.Code != CodeHLSSegmentFetchFailed {
+		t.Fatalf("expected %s, got %s", CodeHLSSegmentFetchFailed, got.Code)
+	}
+	if got := CategorizeError(ErrWorkerPoolFull); got.Code != CodeWorkerPoolFull {
+		t.Fatalf("expected %s, got %s", CodeWorkerPoolFull, got.Code)
+	}
+}

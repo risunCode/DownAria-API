@@ -152,7 +152,7 @@ func TestExtractMetadata_StoryThumbnailFallbackFromInlinePayload(t *testing.T) {
 	}
 }
 
-func TestBuildVariantFilename_StoryContainsAuthorMarkerAndTimestamp(t *testing.T) {
+func TestBuildVariantFilename_StoryContainsAuthorMarkerWithoutTimestampID(t *testing.T) {
 	e := NewFacebookExtractor()
 	meta := fbMetadata{
 		Author:    "Jane Doe",
@@ -162,13 +162,13 @@ func TestBuildVariantFilename_StoryContainsAuthorMarkerAndTimestamp(t *testing.T
 
 	filename := e.buildVariantFilename(meta, "https://www.facebook.com/stories/jane.doe/99887766554433/", "mp4")
 
-	if !strings.HasSuffix(filename, "_[DownAria].mp4") {
+	if !strings.HasSuffix(filename, "[DownAria].mp4") {
 		t.Fatalf("expected branded mp4 filename suffix, got %q", filename)
 	}
-	if !strings.Contains(filename, "jane_doe_story_") {
+	if !strings.Contains(filename, "jane_doe_story_[DownAria].mp4") {
 		t.Fatalf("expected story filename to include author + story marker, got %q", filename)
 	}
-	if !strings.Contains(filename, "20260303183140") {
-		t.Fatalf("expected story filename to include timestamp/id segment, got %q", filename)
+	if strings.Contains(filename, "20260303183140") {
+		t.Fatalf("expected story filename to not include timestamp/id segment, got %q", filename)
 	}
 }

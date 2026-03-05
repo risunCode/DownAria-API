@@ -17,31 +17,55 @@ var (
 	clientOnce    sync.Once
 )
 
+const (
+	defaultRequestTimeout        = 30 * time.Second
+	defaultDialTimeout           = 10 * time.Second
+	defaultKeepAliveTimeout      = 30 * time.Second
+	defaultTLSHandshakeTimeout   = 10 * time.Second
+	defaultResponseHeaderTimeout = 30 * time.Second
+	defaultIdleConnTimeout       = 90 * time.Second
+)
+
+type HTTPClientOptions struct {
+	RequestTimeout        time.Duration
+	DialTimeout           time.Duration
+	KeepAliveTimeout      time.Duration
+	TLSHandshakeTimeout   time.Duration
+	ResponseHeaderTimeout time.Duration
+	IdleConnTimeout       time.Duration
+	Validator             *security.OutboundURLValidator
+}
+
 func init() {
 	GetDefaultClient()
 }
 
 func NewHTTPClient(timeoutSeconds int) *http.Client {
-	return newHTTPClientWithGuard(timeoutSeconds, nil)
-}
-
-func NewHTTPClientWithGuard(timeoutSeconds int, validator *security.OutboundURLValidator) *http.Client {
-	return newHTTPClientWithGuard(timeoutSeconds, validator)
-}
-
-func newHTTPClientWithGuard(timeoutSeconds int, validator *security.OutboundURLValidator) *http.Client {
-	timeout := 30 * time.Second
+	timeout := defaultRequestTimeout
 	if timeoutSeconds > 0 {
 		timeout = time.Duration(timeoutSeconds) * time.Second
 	}
+	return NewHTTPClientWithOptions(HTTPClientOptions{RequestTimeout: timeout})
+}
+
+func NewHTTPClientWithGuard(timeoutSeconds int, validator *security.OutboundURLValidator) *http.Client {
+	timeout := defaultRequestTimeout
+	if timeoutSeconds > 0 {
+		timeout = time.Duration(timeoutSeconds) * time.Second
+	}
+	return NewHTTPClientWithOptions(HTTPClientOptions{RequestTimeout: timeout, Validator: validator})
+}
+
+func NewHTTPClientWithOptions(opts HTTPClientOptions) *http.Client {
+	normalized := normalizeHTTPClientOptions(opts)
 
 	dialer := &net.Dialer{
-		Timeout:   10 * time.Second,
-		KeepAlive: 30 * time.Second,
+		Timeout:   normalized.DialTimeout,
+		KeepAlive: normalized.KeepAliveTimeout,
 	}
 
 	dialContext := dialer.DialContext
-	if validator != nil {
+	if normalized.Validator != nil {
 		dialContext = func(ctx context.Context, networkType string, addr string) (net.Conn, error) {
 			host, _, err := net.SplitHostPort(addr)
 			if err != nil {
@@ -51,7 +75,7 @@ func newHTTPClientWithGuard(timeoutSeconds int, validator *security.OutboundURLV
 			if host == "" {
 				return nil, fmt.Errorf("blocked host")
 			}
-			if err := validator.ValidateHost(ctx, host); err != nil {
+			if err := normalized.Validator.ValidateHost(ctx, host); err != nil {
 				return nil, err
 			}
 			return dialer.DialContext(ctx, networkType, addr)
@@ -62,10 +86,12 @@ func newHTTPClientWithGuard(timeoutSeconds int, validator *security.OutboundURLV
 		MaxIdleConns:          100,
 		MaxIdleConnsPerHost:   10,
 		MaxConnsPerHost:       20,
-		IdleConnTimeout:       90 * time.Second,
+		IdleConnTimeout:       normalized.IdleConnTimeout,
 		DisableKeepAlives:     false,
 		DialContext:           dialContext,
-		TLSHandshakeTimeout:   10 * time.Second,
+		TLSHandshakeTimeout:   normalized.TLSHandshakeTimeout,
+		ResponseHeaderTimeout: normalized.ResponseHeaderTimeout,
+		ForceAttemptHTTP2:     true,
 		ExpectContinueTimeout: 1 * time.Second,
 	}
 
@@ -73,18 +99,37 @@ func newHTTPClientWithGuard(timeoutSeconds int, validator *security.OutboundURLV
 		if len(via) >= 10 {
 			return fmt.Errorf("stopped after 10 redirects")
 		}
-		if validator == nil || req == nil || req.URL == nil {
+		if normalized.Validator == nil || req == nil || req.URL == nil {
 			return nil
 		}
-		_, err := validator.Validate(req.Context(), req.URL.String())
+		_, err := normalized.Validator.Validate(req.Context(), req.URL.String())
 		return err
 	}
 
 	return &http.Client{
-		Timeout:       timeout,
+		Timeout:       normalized.RequestTimeout,
 		Transport:     transport,
 		CheckRedirect: checkRedirect,
 	}
+}
+
+func normalizeHTTPClientOptions(opts HTTPClientOptions) HTTPClientOptions {
+	if opts.DialTimeout <= 0 {
+		opts.DialTimeout = defaultDialTimeout
+	}
+	if opts.KeepAliveTimeout <= 0 {
+		opts.KeepAliveTimeout = defaultKeepAliveTimeout
+	}
+	if opts.TLSHandshakeTimeout <= 0 {
+		opts.TLSHandshakeTimeout = defaultTLSHandshakeTimeout
+	}
+	if opts.ResponseHeaderTimeout <= 0 {
+		opts.ResponseHeaderTimeout = defaultResponseHeaderTimeout
+	}
+	if opts.IdleConnTimeout <= 0 {
+		opts.IdleConnTimeout = defaultIdleConnTimeout
+	}
+	return opts
 }
 
 func GetDefaultClient() *http.Client {
@@ -99,20 +144,5 @@ func GetClientWithTimeout(timeout time.Duration) *http.Client {
 }
 
 func GetClientWithTimeoutGuard(timeout time.Duration, validator *security.OutboundURLValidator) *http.Client {
-	if validator != nil {
-		seconds := int(timeout / time.Second)
-		if timeout > 0 && seconds < 1 {
-			seconds = 1
-		}
-		client := NewHTTPClientWithGuard(seconds, validator)
-		client.Timeout = timeout
-		return client
-	}
-
-	client := GetDefaultClient()
-	return &http.Client{
-		Timeout:       timeout,
-		Transport:     client.Transport,
-		CheckRedirect: client.CheckRedirect,
-	}
+	return NewHTTPClientWithOptions(HTTPClientOptions{RequestTimeout: timeout, Validator: validator})
 }

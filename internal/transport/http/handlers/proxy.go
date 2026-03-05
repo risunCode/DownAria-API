@@ -14,6 +14,7 @@ import (
 	"time"
 
 	apperrors "downaria-api/internal/core/errors"
+	cacheinfra "downaria-api/internal/infra/cache"
 	"downaria-api/internal/infra/network"
 	"downaria-api/internal/shared/util"
 	"downaria-api/internal/transport/http/middleware"
@@ -90,6 +91,7 @@ func (h *Handler) proxyWithMode(w http.ResponseWriter, r *http.Request, forceDow
 	})
 
 	if err != nil {
+		h.metrics.AddFailure()
 		log.Printf("request_id=%s component=proxy event=stream_failed err=%s", requestID, redactLogError(err))
 		_ = builder.WriteError(w, apperrors.HTTPStatus(apperrors.CodeProxyFailed), apperrors.CodeProxyFailed, "failed to stream upstream media")
 		return
@@ -138,9 +140,18 @@ func (h *Handler) proxyWithMode(w http.ResponseWriter, r *http.Request, forceDow
 		w.Header().Set("Content-Disposition", upstreamDisposition)
 	}
 
+	start := time.Now()
+	h.metrics.IncActiveDownloads()
+	defer h.metrics.DecActiveDownloads()
 	w.WriteHeader(result.StatusCode)
 	maxBytes := h.proxySizeLimitBytes(isDownload)
-	_, _ = io.Copy(w, io.LimitReader(result.Body, maxBytes))
+	limited := io.NopCloser(io.LimitReader(result.Body, maxBytes))
+	written, streamErr := h.streamingDownloader.StreamWithBuffer(r.Context(), limited, w, result.ContentType)
+	if streamErr != nil {
+		h.metrics.AddFailure()
+		h.observeCancellationMetric(r.Context(), streamErr)
+	}
+	h.metrics.AddDownload(written, time.Since(start))
 
 	if isDownload && result.StatusCode >= http.StatusOK && result.StatusCode < http.StatusBadRequest {
 		h.statsStore.RecordDownload(time.Now().UTC())
@@ -162,6 +173,15 @@ func (h *Handler) proxySizeLimitBytes(isDownload bool) int64 {
 }
 
 func (h *Handler) getProxyHeadMetadata(ctx context.Context, cacheKey, targetURL string, headers map[string]string) (proxyHeadMetadata, error) {
+	if h.headDeduplicator != nil {
+		meta, err := h.headDeduplicator.GetMetadata(ctx, targetURL, headers)
+		if err == nil {
+			h.metrics.IncHeadHit()
+			return proxyHeadMetadata{StatusCode: meta.StatusCode, ContentType: meta.ContentType, ContentLength: meta.ContentLength}, nil
+		}
+		h.metrics.IncHeadMiss()
+	}
+
 	if h.headCache != nil {
 		if cached, ok := h.headCache.Get(cacheKey); ok {
 			if meta, castOK := cached.(proxyHeadMetadata); castOK {
@@ -197,6 +217,15 @@ func (h *Handler) getProxyHeadMetadata(ctx context.Context, cacheKey, targetURL 
 	}
 	meta, _ := v.(proxyHeadMetadata)
 	return meta, nil
+}
+
+func toHeadMetadata(meta proxyHeadMetadata) cacheinfra.HeadMetadata {
+	return cacheinfra.HeadMetadata{
+		StatusCode:    meta.StatusCode,
+		ContentType:   meta.ContentType,
+		ContentLength: meta.ContentLength,
+		FetchedAt:     time.Now().UTC(),
+	}
 }
 
 func (h *Handler) fetchProxyHeadMetadata(ctx context.Context, targetURL string, headers map[string]string) (proxyHeadMetadata, error) {

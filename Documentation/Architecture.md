@@ -26,7 +26,10 @@ internal/
 │   └── registry/               # Extractor registry
 ├── infra/                      # Infrastructure implementations
 │   ├── cache/                  # TTL cache and Redis stub
-│   ├── network/                # HTTP client and streamer
+│   ├── network/                # HTTP client, streamer, pipeline, concurrent download
+│   ├── hls/                    # HLS parser, rewriter, segment worker/downloader
+│   ├── merge/                  # Streaming merger and merge worker pool
+│   ├── metrics/                # Content delivery metrics registry/exporter
 │   ├── persistence/            # Stats persistence
 │   └── profiling/              # pprof profiling server
 ├── shared/                     # Shared utilities
@@ -91,7 +94,10 @@ Purpose: orchestrate use cases and coordinate extractors with infrastructure.
 Purpose: implement technical details such as caching, HTTP clients, and persistence.
 
 - `cache/`: in-memory TTL cache and Redis stub
-- `network/`: HTTP client and streamer
+- `network/`: optimized HTTP client, adaptive buffer pool, streaming downloader, pipeline, concurrent downloader
+- `hls/`: playlist parser/rewriter, segment worker pool, segment concatenation downloader
+- `merge/`: streaming merge implementation and bounded merge worker queue
+- `metrics/`: Prometheus text-format compatible content delivery metrics
 - `persistence/`: file-based stats persistence
 - `profiling/`: pprof profiling server
 
