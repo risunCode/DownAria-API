@@ -123,8 +123,8 @@ func TestHealthHandler(t *testing.T) {
 	}
 
 	data := response["data"].(map[string]interface{})
-	if data["status"] != "ok" {
-		t.Errorf("expected status 'ok', got %v", data["status"])
+	if data["status"] != "healthy" {
+		t.Errorf("expected status 'healthy', got %v", data["status"])
 	}
 
 	if _, ok := data["timestamp"]; !ok {
