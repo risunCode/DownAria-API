@@ -55,6 +55,9 @@ func TestInferVariantExtension_FallbackOrder(t *testing.T) {
 	if got := inferVariantExtension(&core.Variant{Mime: "audio/mpeg", URL: "https://a/b.bin"}, core.MediaTypeAudio); got != "mp3" {
 		t.Fatalf("expected mime fallback mp3, got %q", got)
 	}
+	if got := inferVariantExtension(&core.Variant{Mime: "application/vnd.apple.mpegurl; charset=utf-8", URL: "https://a/stream"}, core.MediaTypeVideo); got != "m3u8" {
+		t.Fatalf("expected mime fallback m3u8, got %q", got)
+	}
 	if got := inferVariantExtension(&core.Variant{URL: "https://a/b.webm?x=1"}, core.MediaTypeVideo); got != "webm" {
 		t.Fatalf("expected url fallback webm, got %q", got)
 	}
@@ -107,5 +110,33 @@ func TestEnsureVariantFilenames_ReplacesUnknownWithContentBasedName(t *testing.T
 	}
 	if got := result.Media[0].Variants[2].Filename; strings.Contains(got, "_1_") {
 		t.Fatalf("expected media index 0 to hide numeric suffix, got %q", got)
+	}
+}
+
+func TestEnsureVariantFilenames_FacebookStoryUsesStoriesDatePattern(t *testing.T) {
+	h := &Handler{}
+	result := &core.ExtractResult{
+		URL:      "https://www.facebook.com/stories/jane.doe/99887766554433/",
+		Platform: "facebook",
+		Author:   core.Author{Name: "Jane Doe"},
+		Content:  core.Content{CreatedAt: "2026-03-03T18:31:40Z"},
+		Media: []core.Media{
+			{
+				Type: core.MediaTypeStory,
+				Variants: []core.Variant{
+					{Format: "mp4"},
+					{Format: "mp4"},
+				},
+			},
+		},
+	}
+
+	h.ensureVariantFilenames(result)
+
+	if got := result.Media[0].Variants[0].Filename; got != "jane_doe_stories_20260303_[DownAria].mp4" {
+		t.Fatalf("expected first story filename pattern, got %q", got)
+	}
+	if got := result.Media[0].Variants[1].Filename; got != "jane_doe_stories_20260303_1_[DownAria].mp4" {
+		t.Fatalf("expected indexed story filename pattern, got %q", got)
 	}
 }

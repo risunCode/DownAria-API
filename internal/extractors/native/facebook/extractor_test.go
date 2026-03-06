@@ -103,6 +103,37 @@ func TestExtractFormats_DedupStoryVariantsByQualityAndPath(t *testing.T) {
 	}
 }
 
+func TestPreferStoryFormats_PicksHighestQuality(t *testing.T) {
+	formats := []rawFormat{
+		{Quality: "SD", URL: "https://video.cdn.test/story_sd.mp4"},
+		{Quality: "HD", URL: "https://video.cdn.test/story_hd.mp4"},
+	}
+
+	got := preferStoryFormats(formats)
+	if len(got) != 1 {
+		t.Fatalf("expected single deduped story format, got %d", len(got))
+	}
+	if got[0].Quality != "HD" {
+		t.Fatalf("expected highest quality HD, got %q", got[0].Quality)
+	}
+}
+
+func TestPreferStoryFormats_FallbackLowestWhenNoHighQuality(t *testing.T) {
+	formats := []rawFormat{
+		{Quality: "540p", URL: "https://video.cdn.test/story_540.mp4"},
+		{Quality: "360p", URL: "https://video.cdn.test/story_360.mp4"},
+		{Quality: "480p", URL: "https://video.cdn.test/story_480.mp4"},
+	}
+
+	got := preferStoryFormats(formats)
+	if len(got) != 1 {
+		t.Fatalf("expected single fallback story format, got %d", len(got))
+	}
+	if got[0].Quality != "360p" {
+		t.Fatalf("expected lowest quality fallback 360p, got %q", got[0].Quality)
+	}
+}
+
 func TestCheckLoginRequired_DoesNotFailWhenProgressiveMediaPresent(t *testing.T) {
 	e := NewFacebookExtractor()
 	html := `<html><body>login.php "progressive_url":"https:\/\/video.cdn.test\/story_sd.mp4"</body></html>`

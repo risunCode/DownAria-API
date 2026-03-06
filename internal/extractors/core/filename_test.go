@@ -70,3 +70,12 @@ func TestGenerateFilename_IndexZeroHidden(t *testing.T) {
 		t.Fatalf("unexpected filename for index 0, want %s got %s", want, got)
 	}
 }
+
+func TestGetExtensionFromMime_UsesSharedMimeHelperMappings(t *testing.T) {
+	if got := GetExtensionFromMime("application/vnd.apple.mpegurl; charset=utf-8"); got != "m3u8" {
+		t.Fatalf("expected m3u8 extension for HLS mime, got %q", got)
+	}
+	if got := GetExtensionFromMime("audio/x-wav"); got != "wav" {
+		t.Fatalf("expected wav extension for audio/x-wav, got %q", got)
+	}
+}

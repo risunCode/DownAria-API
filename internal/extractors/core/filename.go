@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	mediapkg "downaria-api/pkg/media"
 )
 
 var (
@@ -142,59 +144,5 @@ func truncateUTF8(s string, maxBytes int) string {
 
 // GetExtensionFromMime returns file extension for a given MIME type
 func GetExtensionFromMime(mimeType string) string {
-	mimeType = strings.ToLower(strings.TrimSpace(mimeType))
-
-	// Remove parameters (e.g., "video/mp4; codecs=..." -> "video/mp4")
-	if idx := strings.Index(mimeType, ";"); idx >= 0 {
-		mimeType = mimeType[:idx]
-	}
-
-	switch mimeType {
-	// Video
-	case "video/mp4":
-		return "mp4"
-	case "video/webm":
-		return "webm"
-	case "video/quicktime":
-		return "mov"
-	case "video/mpeg":
-		return "mpeg"
-	case "video/x-msvideo":
-		return "avi"
-	case "video/x-matroska":
-		return "mkv"
-
-	// Audio
-	case "audio/mpeg":
-		return "mp3"
-	case "audio/mp4", "audio/x-m4a":
-		return "m4a"
-	case "audio/aac":
-		return "aac"
-	case "audio/ogg":
-		return "ogg"
-	case "audio/wav":
-		return "wav"
-	case "audio/webm":
-		return "webm"
-	case "audio/flac":
-		return "flac"
-
-	// Image
-	case "image/jpeg":
-		return "jpg"
-	case "image/png":
-		return "png"
-	case "image/webp":
-		return "webp"
-	case "image/gif":
-		return "gif"
-	case "image/bmp":
-		return "bmp"
-	case "image/svg+xml":
-		return "svg"
-
-	default:
-		return "bin"
-	}
+	return mediapkg.GetExtensionFromMime(mimeType)
 }

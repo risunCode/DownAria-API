@@ -16,7 +16,8 @@ import (
 )
 
 var (
-	fbNumericRe = regexp.MustCompile(`^\d+$`)
+	fbNumericRe            = regexp.MustCompile(`^\d+$`)
+	fbQualityHeightPattern = regexp.MustCompile(`(\d{3,4})p`)
 
 	// Story-first author patterns
 	fbStoryAuthorPatterns = []*regexp.Regexp{
@@ -130,6 +131,9 @@ func (e *FacebookExtractor) Extract(urlStr string, opts core.ExtractOptions) (*c
 
 	metadata := e.extractMetadata(html, finalURL)
 	formats := e.extractFormats(html)
+	if isFacebookStoryURL(finalURL) {
+		formats = preferStoryFormats(formats)
+	}
 
 	if len(formats) == 0 {
 		return nil, fmt.Errorf("no media found on page")
@@ -916,6 +920,72 @@ func (e *FacebookExtractor) extractFormats(html string) []rawFormat {
 	}
 
 	return formats
+}
+
+func preferStoryFormats(formats []rawFormat) []rawFormat {
+	if len(formats) <= 1 {
+		return formats
+	}
+
+	highestIdx := -1
+	highestScore := -1
+	lowestIdx := -1
+	lowestScore := int(^uint(0) >> 1)
+
+	for i, f := range formats {
+		score := storyQualityScore(f.Quality)
+
+		if score >= 720 && score > highestScore {
+			highestScore = score
+			highestIdx = i
+		}
+
+		if score > 0 && score < lowestScore {
+			lowestScore = score
+			lowestIdx = i
+		}
+	}
+
+	if highestIdx >= 0 {
+		return []rawFormat{formats[highestIdx]}
+	}
+	if lowestIdx >= 0 {
+		return []rawFormat{formats[lowestIdx]}
+	}
+
+	return []rawFormat{formats[0]}
+}
+
+func storyQualityScore(quality string) int {
+	q := strings.ToLower(strings.TrimSpace(quality))
+	if q == "" {
+		return 0
+	}
+
+	if match := fbQualityHeightPattern.FindStringSubmatch(q); len(match) > 1 {
+		if n, err := strconv.Atoi(match[1]); err == nil {
+			return n
+		}
+	}
+
+	switch {
+	case strings.Contains(q, "4k"), strings.Contains(q, "uhd"):
+		return 2160
+	case strings.Contains(q, "2k"), strings.Contains(q, "qhd"):
+		return 1440
+	case strings.Contains(q, "fhd"), strings.Contains(q, "full hd"), strings.Contains(q, "1080"):
+		return 1080
+	case strings.Contains(q, "hd"):
+		return 720
+	case strings.Contains(q, "sd"):
+		return 480
+	case strings.Contains(q, "ld"), strings.Contains(q, "low"):
+		return 360
+	case strings.Contains(q, "original"):
+		return 1080
+	default:
+		return 0
+	}
 }
 
 func extractInlineThumbnail(html string) string {

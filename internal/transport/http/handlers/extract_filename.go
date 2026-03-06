@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"downaria-api/internal/extractors/core"
@@ -28,6 +29,9 @@ func (h *Handler) ensureVariantFilenames(result *core.ExtractResult) {
 
 	author := preferredAuthorSeed(result)
 	title := smartTitleSeed(result)
+	if isFacebookStoryResult(result) {
+		title = buildFacebookStoryTitle(result.Content.CreatedAt)
+	}
 	sequence := 0
 	for mediaIdx := range result.Media {
 		for variantIdx := range result.Media[mediaIdx].Variants {
@@ -37,6 +41,33 @@ func (h *Handler) ensureVariantFilenames(result *core.ExtractResult) {
 			sequence++
 		}
 	}
+}
+
+func isFacebookStoryResult(result *core.ExtractResult) bool {
+	if result == nil {
+		return false
+	}
+	if !strings.EqualFold(strings.TrimSpace(result.Platform), "facebook") {
+		return false
+	}
+	return strings.Contains(strings.ToLower(strings.TrimSpace(result.URL)), "/stories/")
+}
+
+func buildFacebookStoryTitle(createdAt string) string {
+	dateToken := "date"
+	v := strings.TrimSpace(createdAt)
+	if v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			dateToken = t.UTC().Format("20060102")
+		} else if len(v) >= 10 {
+			prefix := v[:10]
+			if t, dateErr := time.Parse("2006-01-02", prefix); dateErr == nil {
+				dateToken = t.Format("20060102")
+			}
+		}
+	}
+
+	return "stories_" + dateToken
 }
 
 func smartTitleSeed(result *core.ExtractResult) string {
