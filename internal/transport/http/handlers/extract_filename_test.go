@@ -63,6 +63,22 @@ func TestInferVariantExtension_FallbackOrder(t *testing.T) {
 	}
 }
 
+func TestSmartTitleSeed_RemovesURLTagsAndNoiseWords(t *testing.T) {
+	result := &core.ExtractResult{
+		Content: core.Content{
+			Text: "Astag follow me https://t.co/abc #viral @foo Cyrene cosplay source original",
+		},
+	}
+
+	got := smartTitleSeed(result)
+	if strings.Contains(strings.ToLower(got), "http") || strings.Contains(strings.ToLower(got), "follow") {
+		t.Fatalf("expected noisy tokens removed, got %q", got)
+	}
+	if !strings.Contains(strings.ToLower(got), "cyrene") || !strings.Contains(strings.ToLower(got), "cosplay") {
+		t.Fatalf("expected informative tokens preserved, got %q", got)
+	}
+}
+
 func TestEnsureVariantFilenames_ReplacesUnknownWithContentBasedName(t *testing.T) {
 	h := &Handler{}
 	result := &core.ExtractResult{

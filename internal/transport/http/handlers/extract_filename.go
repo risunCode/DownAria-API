@@ -2,10 +2,23 @@ package handlers
 
 import (
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"downaria-api/internal/extractors/core"
+)
+
+var (
+	noiseURLRe        = regexp.MustCompile(`(?i)https?://\S+|www\.\S+`)
+	noiseTagRe        = regexp.MustCompile(`(?i)(^|\s)[#@][\p{L}\p{N}_]+`)
+	noiseSpaceRe      = regexp.MustCompile(`\s+`)
+	filenameStopwords = map[string]struct{}{
+		"follow": {}, "following": {}, "followers": {}, "subscribe": {}, "sub": {}, "like": {}, "likes": {}, "share": {},
+		"repost": {}, "retweet": {}, "comment": {}, "comments": {}, "credit": {}, "credits": {}, "source": {},
+		"original": {}, "link": {}, "bio": {}, "astag": {}, "hashtag": {}, "hashtags": {}, "trend": {}, "viral": {},
+	}
 )
 
 func (h *Handler) ensureVariantFilenames(result *core.ExtractResult) {
@@ -14,10 +27,7 @@ func (h *Handler) ensureVariantFilenames(result *core.ExtractResult) {
 	}
 
 	author := preferredAuthorSeed(result)
-	title := strings.TrimSpace(result.Content.Text)
-	if title == "" {
-		title = strings.TrimSpace(result.Content.Description)
-	}
+	title := smartTitleSeed(result)
 	sequence := 0
 	for mediaIdx := range result.Media {
 		for variantIdx := range result.Media[mediaIdx].Variants {
@@ -27,6 +37,49 @@ func (h *Handler) ensureVariantFilenames(result *core.ExtractResult) {
 			sequence++
 		}
 	}
+}
+
+func smartTitleSeed(result *core.ExtractResult) string {
+	if result == nil {
+		return ""
+	}
+	raw := strings.TrimSpace(result.Content.Text)
+	if raw == "" {
+		raw = strings.TrimSpace(result.Content.Description)
+	}
+	if raw == "" {
+		return ""
+	}
+
+	clean := noiseURLRe.ReplaceAllString(raw, " ")
+	clean = noiseTagRe.ReplaceAllString(clean, " ")
+	clean = strings.NewReplacer("|", " ", "•", " ", "·", " ", "—", " ", "-", " ").Replace(clean)
+	clean = noiseSpaceRe.ReplaceAllString(strings.TrimSpace(clean), " ")
+	if clean == "" {
+		return raw
+	}
+
+	tokens := strings.Fields(clean)
+	filtered := make([]string, 0, len(tokens))
+	for _, tk := range tokens {
+		v := strings.Trim(strings.ToLower(strings.TrimSpace(tk)), "_.,:;!?()[]{}\"'`~")
+		if v == "" {
+			continue
+		}
+		if _, blocked := filenameStopwords[v]; blocked {
+			continue
+		}
+		if utf8.RuneCountInString(v) <= 1 {
+			continue
+		}
+		filtered = append(filtered, tk)
+	}
+
+	if len(filtered) == 0 {
+		return clean
+	}
+
+	return strings.Join(filtered, " ")
 }
 
 func generateDisplayFilename(author, title, ext string, mediaIdx int) string {
