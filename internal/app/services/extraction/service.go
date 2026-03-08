@@ -220,6 +220,10 @@ func shouldAdvanceAuthLane(err error) bool {
 
 	authHints := []string{
 		"login required",
+		"sign in to confirm",
+		"not a bot",
+		"use --cookies-from-browser",
+		"use --cookies for the authentication",
 		"authentication required",
 		"auth required",
 		"requires cookie",

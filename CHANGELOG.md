@@ -17,6 +17,7 @@ This format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Removed the remaining backend `/api/web/hls-stream` transport route and its dedicated handler/test wiring because HLS streaming is no longer part of the active frontend flow.
 - Removed legacy extraction error remapping and old request-id compatibility fallbacks so transport responses rely on the canonical error/request metadata path.
 - Removed deprecated filename compatibility helpers and updated extractors to generate filenames through the single direct filename builder.
+- Improved extraction auth-lane fallback so YouTube bot-check errors now advance to the user-provided cookie lane instead of failing early on the guest lane.
 
 ## [1.2.1] - 2026-03-06
 

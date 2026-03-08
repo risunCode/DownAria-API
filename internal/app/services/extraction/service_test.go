@@ -630,3 +630,41 @@ func TestExtractionService_CookieLane_AdvancesOnMediaNotFoundPrivateError(t *tes
 		t.Fatalf("expected 3 calls, got %d", calls)
 	}
 }
+
+func TestExtractionService_CookieLane_AdvancesOnYoutubeBotCheckError(t *testing.T) {
+	reg := registry.NewRegistry()
+
+	calls := 0
+	reg.Register("youtube", []*regexp.Regexp{regexp.MustCompile(`^https://www\.youtube\.com/.*$`)}, func() core.Extractor {
+		return extractorFunc(func(url string, opts core.ExtractOptions) (*core.ExtractResult, error) {
+			calls++
+			switch calls {
+			case 1:
+				if opts.Source != core.AuthSourceNone {
+					t.Fatalf("call1 expected none source, got %s", opts.Source)
+				}
+				return nil, fmt.Errorf("yt-dlp execution failed: ERROR: [youtube] abc123: Sign in to confirm you're not a bot. Use --cookies-from-browser or --cookies for the authentication")
+			default:
+				if opts.Source != core.AuthSourceClient {
+					t.Fatalf("call2 expected client source, got %s", opts.Source)
+				}
+				if opts.Cookie != "sid=user" {
+					t.Fatalf("call2 expected user cookie, got %q", opts.Cookie)
+				}
+				return &core.ExtractResult{URL: url, Platform: "youtube", Authentication: core.Authentication{Used: true, Source: core.AuthSourceClient}}, nil
+			}
+		})
+	})
+
+	svc := NewService(reg, 30, 1, 0)
+	result, err := svc.Extract(context.Background(), ExtractInput{URL: "https://www.youtube.com/watch?v=abc123", Cookie: "sid=user"})
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+	if result.Authentication.Source != core.AuthSourceClient {
+		t.Fatalf("expected user-provided lane, got %s", result.Authentication.Source)
+	}
+	if calls != 2 {
+		t.Fatalf("expected 2 calls, got %d", calls)
+	}
+}
