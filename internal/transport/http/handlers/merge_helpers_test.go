@@ -83,7 +83,14 @@ func TestBuildYTDLPFormatSelectorPrefersAVC1(t *testing.T) {
 	if sel == "" {
 		t.Fatal("expected non-empty selector")
 	}
-	if got, want := sel, "bestvideo[vcodec^=avc1][height<=1080]+bestaudio/bestvideo[vcodec^=h264][height<=1080]+bestaudio/bestvideo[height<=1080]+bestaudio"; got != want {
+	if got, want := sel, "bestvideo[vcodec^=avc1][height<=1080]+bestaudio/bestvideo[vcodec^=h264][height<=1080]+bestaudio/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"; got != want {
+		t.Fatalf("unexpected selector: %s", got)
+	}
+}
+
+func TestBuildYTDLPFormatSelectorFallsBackToBest(t *testing.T) {
+	sel := buildYTDLPFormatSelector("", false)
+	if got, want := sel, "bestvideo[vcodec^=avc1]+bestaudio/bestvideo[vcodec^=h264]+bestaudio/bestvideo+bestaudio/best"; got != want {
 		t.Fatalf("unexpected selector: %s", got)
 	}
 }

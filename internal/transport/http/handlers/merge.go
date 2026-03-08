@@ -682,10 +682,10 @@ func buildYTDLPFormatSelector(quality string, audioOnly bool) string {
 
 	height := parseQualityHeight(quality)
 	if height > 0 {
-		return fmt.Sprintf("bestvideo[vcodec^=avc1][height<=%d]+bestaudio/bestvideo[vcodec^=h264][height<=%d]+bestaudio/bestvideo[height<=%d]+bestaudio", height, height, height)
+		return fmt.Sprintf("bestvideo[vcodec^=avc1][height<=%d]+bestaudio/bestvideo[vcodec^=h264][height<=%d]+bestaudio/bestvideo[height<=%d]+bestaudio/best[height<=%d]/best", height, height, height, height)
 	}
 
-	return "bestvideo[vcodec^=avc1]+bestaudio/bestvideo[vcodec^=h264]+bestaudio/bestvideo+bestaudio"
+	return "bestvideo[vcodec^=avc1]+bestaudio/bestvideo[vcodec^=h264]+bestaudio/bestvideo+bestaudio/best"
 }
 
 var qualityHeightRe = regexp.MustCompile(`(?i)(\d{3,4})\s*p`)
