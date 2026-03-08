@@ -118,11 +118,7 @@ func (h *Handler) mapExtractError(err error) (status int, code, message, categor
 	category = string(appErr.Category)
 	metadata = copyAnyMap(appErr.Metadata)
 
-	if appErr.Category == apperrors.CategoryExtractionFailed {
-		legacyStatus, legacyCode, legacyMessage := apperrors.MapExtractionError(err)
-		status, code, message = legacyStatus, legacyCode, legacyMessage
-		category = categoryFromCode(legacyCode)
-	} else if category == "" {
+	if category == "" {
 		category = categoryFromCode(code)
 	}
 

@@ -19,7 +19,7 @@ func TestParserAndRewriter(t *testing.T) {
 		t.Fatalf("parse failed: %v", err)
 	}
 	m := pl.(*m3u8.MediaPlaylist)
-	RewriteMediaPlaylist(m, "https://x/y/index.m3u8", "/api/v1/hls-stream")
+	RewriteMediaPlaylist(m, "https://x/y/index.m3u8", "/api/web/hls-stream")
 	if !strings.Contains(m.Encode().String(), "chunk=1") {
 		t.Fatalf("expected chunk rewrite")
 	}
@@ -44,7 +44,7 @@ func TestRewriteMasterPlaylist_WithAlternatives(t *testing.T) {
 
 	master := pl.(*m3u8.MasterPlaylist)
 	baseURL := "https://example.com/video/master.m3u8"
-	routePrefix := "/api/v1/hls-stream"
+	routePrefix := "/api/web/hls-stream"
 
 	// Rewrite the playlist
 	RewriteMasterPlaylist(master, baseURL, routePrefix)
@@ -52,15 +52,15 @@ func TestRewriteMasterPlaylist_WithAlternatives(t *testing.T) {
 	encoded := master.Encode().String()
 
 	// Verify variant URIs are rewritten
-	if !strings.Contains(encoded, "/api/v1/hls-stream?url=https%3A%2F%2Fexample.com%2Fvideo%2F720p.m3u8") {
+	if !strings.Contains(encoded, "/api/web/hls-stream?url=https%3A%2F%2Fexample.com%2Fvideo%2F720p.m3u8") {
 		t.Errorf("720p variant URI not correctly rewritten")
 	}
-	if !strings.Contains(encoded, "/api/v1/hls-stream?url=https%3A%2F%2Fexample.com%2Fvideo%2F1080p.m3u8") {
+	if !strings.Contains(encoded, "/api/web/hls-stream?url=https%3A%2F%2Fexample.com%2Fvideo%2F1080p.m3u8") {
 		t.Errorf("1080p variant URI not correctly rewritten")
 	}
 
 	// Verify audio alternative URI is rewritten (should appear only once in EXT-X-MEDIA tag)
-	expectedAudioURI := "/api/v1/hls-stream?url=https%3A%2F%2Fexample.com%2Faudio%2F128k.m3u8"
+	expectedAudioURI := "/api/web/hls-stream?url=https%3A%2F%2Fexample.com%2Faudio%2F128k.m3u8"
 	if !strings.Contains(encoded, expectedAudioURI) {
 		t.Errorf("audio URI not correctly rewritten")
 	}

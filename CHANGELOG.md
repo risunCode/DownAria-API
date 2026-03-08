@@ -3,6 +3,21 @@
 All notable changes to **DownAria-API** are documented in this file.
 This format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.3.0] - 2026-03-08
+
+### Security
+- Moved protected HLS gateway traffic fully behind signed `web` route handling instead of relying on the previous public-facing compatibility path.
+- Removed permissive wildcard CORS behavior from HLS responses used by the signed web flow.
+
+### Changed
+- Removed unused legacy stream and duplicate HLS playlist rewriter code paths to lower maintenance overhead.
+- Refactored the main HTTP handler construction into smaller setup helpers so infrastructure wiring is easier to follow and less brittle.
+- Preserved public `v1` compatibility routes while tightening the intended `web/*` gateway path used by the frontend.
+- Removed `/api/v1/hls-stream` and standardized backend HLS rewriting on the signed `/api/web/hls-stream` route.
+- Removed the remaining backend `/api/web/hls-stream` transport route and its dedicated handler/test wiring because HLS streaming is no longer part of the active frontend flow.
+- Removed legacy extraction error remapping and old request-id compatibility fallbacks so transport responses rely on the canonical error/request metadata path.
+- Removed deprecated filename compatibility helpers and updated extractors to generate filenames through the single direct filename builder.
+
 ## [1.2.1] - 2026-03-06
 
 ### Changed

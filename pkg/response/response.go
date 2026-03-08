@@ -11,8 +11,7 @@ import (
 )
 
 const (
-	RequestIDContextKey       = "requestId"
-	LegacyRequestIDContextKey = "request_id"
+	RequestIDContextKey = "requestId"
 )
 
 type Envelope struct {
@@ -163,19 +162,6 @@ func WriteSuccessRequest(w http.ResponseWriter, r *http.Request, statusCode int,
 	_ = NewBuilderFromRequest(r).Success(data).Write(w, statusCode)
 }
 
-func WriteSuccessWithMeta(w http.ResponseWriter, statusCode int, data any, meta any) {
-	b := NewBuilder().Success(data)
-	if m, ok := meta.(map[string]any); ok {
-		if rid, ok := m["requestId"].(string); ok {
-			b.ensureMeta().RequestID = strings.TrimSpace(rid)
-		}
-		if rt, ok := m["responseTime"].(int64); ok {
-			b.ensureMeta().ResponseTime = rt
-		}
-	}
-	_ = b.Write(w, statusCode)
-}
-
 func WriteError(w http.ResponseWriter, statusCode int, code, message string) {
 	_ = NewBuilder().Error(code, message).Write(w, statusCode)
 }
@@ -190,19 +176,6 @@ func WriteErrorRequest(w http.ResponseWriter, r *http.Request, statusCode int, c
 
 func WriteErrorRequestWithDetails(w http.ResponseWriter, r *http.Request, statusCode int, code, message, category string, metadata map[string]any) {
 	_ = NewBuilderFromRequest(r).ErrorWithDetails(code, message, category, metadata).Write(w, statusCode)
-}
-
-func WriteErrorWithMeta(w http.ResponseWriter, statusCode int, code, message string, meta any) {
-	b := NewBuilder().Error(code, message)
-	if m, ok := meta.(map[string]any); ok {
-		if rid, ok := m["requestId"].(string); ok {
-			b.ensureMeta().RequestID = strings.TrimSpace(rid)
-		}
-		if rt, ok := m["responseTime"].(int64); ok {
-			b.ensureMeta().ResponseTime = rt
-		}
-	}
-	_ = b.Write(w, statusCode)
 }
 
 func writeJSON(w http.ResponseWriter, statusCode int, payload Envelope) error {
@@ -254,9 +227,6 @@ func requestIDFromContext(ctx context.Context) string {
 		return ""
 	}
 	if requestID, ok := ctx.Value(RequestIDContextKey).(string); ok && strings.TrimSpace(requestID) != "" {
-		return requestID
-	}
-	if requestID, ok := ctx.Value(LegacyRequestIDContextKey).(string); ok && strings.TrimSpace(requestID) != "" {
 		return requestID
 	}
 	return ""

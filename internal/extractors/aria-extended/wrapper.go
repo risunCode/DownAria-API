@@ -248,7 +248,7 @@ func (e *PythonExtractor) buildResultFromMeta(urlStr string, meta *core.YTDLPDum
 		variant = variant.WithMerge(f.VCodec != "" && f.VCodec != "none" && (f.ACodec == "" || f.ACodec == "none"))
 		variant = variant.WithFormatID(f.FormatID)
 
-		// Generate filename: author_title_id_[DownAria].ext
+		// Generate filename: author_title_[DownAria].ext
 		extension := classification.Extension
 		if extension == "" {
 			extension = core.ClassifyMedia("", meta.Ext, "", "").Extension
@@ -256,7 +256,7 @@ func (e *PythonExtractor) buildResultFromMeta(urlStr string, meta *core.YTDLPDum
 		if extension == "" {
 			extension = "bin"
 		}
-		filename := core.GenerateFilenameWithMeta(meta.Uploader, meta.Title, meta.UploaderID, meta.ID, extension)
+		filename := core.GenerateFilename(meta.Uploader, meta.Title, "", extension)
 		variant = variant.WithFilename(filename)
 
 		variants = append(variants, variant)

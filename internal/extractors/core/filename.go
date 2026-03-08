@@ -50,19 +50,6 @@ func GenerateFilename(author, title, contentID, extension string) string {
 	return filename
 }
 
-// BuildFilenameID is kept for backward compatibility.
-// IDs/timestamps are no longer included in generated filenames.
-func BuildFilenameID(authorID, postID string) string {
-	_ = authorID
-	_ = postID
-	return ""
-}
-
-// GenerateFilenameWithMeta builds filename using author/title and ID strategy.
-func GenerateFilenameWithMeta(author, title, authorID, postID, extension string) string {
-	return GenerateFilename(author, title, BuildFilenameID(authorID, postID), extension)
-}
-
 // sanitizeFilenameComponent removes/replaces invalid filename characters
 func sanitizeFilenameComponent(s string) string {
 	if s == "" {

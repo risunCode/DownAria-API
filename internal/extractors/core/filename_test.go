@@ -38,13 +38,6 @@ func TestGenerateFilename_EmptyTitleDoesNotUseUntitled(t *testing.T) {
 	}
 }
 
-func TestBuildFilenameID_DisabledReturnsEmpty(t *testing.T) {
-	got := BuildFilenameID("creator_01", "99887766")
-	if want := ""; got != want {
-		t.Fatalf("expected %s got %s", want, got)
-	}
-}
-
 func TestGenerateFilename_NoTitleCap(t *testing.T) {
 	got := GenerateFilename(
 		"author",

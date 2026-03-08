@@ -132,22 +132,20 @@ func (e *InstagramExtractor) Extract(urlStr string, opts core.ExtractOptions) (*
 			if node.IsVideo {
 				media.Type = core.MediaTypeVideo
 				variant := core.NewVideoVariant("HD", node.VideoURL)
-				filename := core.GenerateFilenameWithMeta(
+				filename := core.GenerateFilename(
 					mediaData.Owner.Username,
 					caption,
-					mediaData.Owner.Username,
-					mediaData.ID,
+					"",
 					"mp4",
 				)
 				variant = variant.WithFilename(filename)
 				core.AddVariant(&media, variant)
 			} else {
 				variant := core.NewImageVariant("Original", node.DisplayURL)
-				filename := core.GenerateFilenameWithMeta(
+				filename := core.GenerateFilename(
 					mediaData.Owner.Username,
 					caption,
-					mediaData.Owner.Username,
-					mediaData.ID,
+					"",
 					"jpg",
 				)
 				variant = variant.WithFilename(filename)
@@ -160,22 +158,20 @@ func (e *InstagramExtractor) Extract(urlStr string, opts core.ExtractOptions) (*
 		if mediaData.IsVideo {
 			media.Type = core.MediaTypeVideo
 			variant := core.NewVideoVariant("HD", mediaData.VideoURL)
-			filename := core.GenerateFilenameWithMeta(
+			filename := core.GenerateFilename(
 				mediaData.Owner.Username,
 				caption,
-				mediaData.Owner.Username,
-				mediaData.ID,
+				"",
 				"mp4",
 			)
 			variant = variant.WithFilename(filename)
 			core.AddVariant(&media, variant)
 		} else {
 			variant := core.NewImageVariant("Original", mediaData.DisplayURL)
-			filename := core.GenerateFilenameWithMeta(
+			filename := core.GenerateFilename(
 				mediaData.Owner.Username,
 				caption,
-				mediaData.Owner.Username,
-				mediaData.ID,
+				"",
 				"jpg",
 			)
 			variant = variant.WithFilename(filename)

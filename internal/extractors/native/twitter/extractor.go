@@ -355,13 +355,13 @@ func (e *TwitterExtractor) buildResult(urlStr string, data *twitterExtractData, 
 						WithMime("application/vnd.apple.mpegurl").
 						WithProxy(true)
 				}
-				filename := core.GenerateFilenameWithMeta(filenameSeed, text, authorScreenName, tweetID, "mp4")
+				filename := core.GenerateFilename(filenameSeed, text, "", "mp4")
 				variant = variant.WithFilename(filename)
 				core.AddVariant(&media, variant)
 			}
 		} else {
 			variant := core.NewImageVariant("Original", item.MediaURLHTTPS)
-			filename := core.GenerateFilenameWithMeta(filenameSeed, text, authorScreenName, tweetID, "jpg")
+			filename := core.GenerateFilename(filenameSeed, text, "", "jpg")
 			variant = variant.WithFilename(filename)
 			core.AddVariant(&media, variant)
 		}

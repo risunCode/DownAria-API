@@ -11,7 +11,6 @@ import (
 	"downaria-api/internal/extractors"
 	"downaria-api/internal/extractors/registry"
 	"downaria-api/internal/infra/cache"
-	infrahls "downaria-api/internal/infra/hls"
 	"downaria-api/internal/infra/merge"
 	"downaria-api/internal/infra/metrics"
 	"downaria-api/internal/infra/network"
@@ -37,14 +36,18 @@ type Handler struct {
 	bufferPool           *network.BufferPool
 	streamingDownloader  *network.StreamingDownloader
 	concurrentDownloader *network.ConcurrentDownloader
-	hlsParser            *infrahls.Parser
-	hlsDownloader        *infrahls.SegmentDownloader
 	mergePool            *merge.MergeWorkerPool
 	metrics              *metrics.ContentDeliveryMetrics
 }
 
 type statsStoreCloser interface {
 	Close() error
+}
+
+type handlerHTTPClients struct {
+	guarded   *http.Client
+	streaming *http.Client
+	urlGuard  *security.OutboundURLValidator
 }
 
 func NewHandler(cfg config.Config, startedAt time.Time) *Handler {
@@ -54,10 +57,42 @@ func NewHandler(cfg config.Config, startedAt time.Time) *Handler {
 
 	baseExtractor := extraction.NewService(reg, 30, cfg.ExtractionMaxRetries, cfg.ExtractionRetryDelayMs)
 	cachedExtractor := extraction.NewCachedService(baseExtractor, cache.NewPlatformTTLConfig(cfg.CacheExtractionTTL, cfg.CacheExtractionPlatformTTLs))
+	trustedProxies := parseTrustedProxies(cfg)
+	httpClients := newHandlerHTTPClients(cfg)
+	bufferPool := network.NewBufferPool()
+	metricsCollector := metrics.NewContentDeliveryMetrics()
+	mergePool := newMergePool(cfg, metricsCollector)
+
+	return &Handler{
+		config:     cfg,
+		startedAt:  startedAt,
+		httpClient: httpClients.guarded,
+		statsStore: newStatsStore(cfg, startedAt),
+		Streamer:   network.NewStreamerWithClient(httpClients.streaming),
+		extractor:  cachedExtractor,
+		headCache:  cache.NewTTLCacheWithMaxEntries(2048),
+		clientIPFn: func(r *http.Request) string {
+			return util.ClientIPFromRequestWithTrustedProxies(r, trustedProxies)
+		},
+		urlGuard:             httpClients.urlGuard,
+		headDeduplicator:     cache.NewHeadDeduplicator(httpClients.guarded, cfg.CacheProxyHeadTTL, 2048),
+		bufferPool:           bufferPool,
+		streamingDownloader:  network.NewStreamingDownloader(bufferPool),
+		concurrentDownloader: network.NewConcurrentDownloader(httpClients.streaming),
+		mergePool:            mergePool,
+		metrics:              metricsCollector,
+	}
+}
+
+func parseTrustedProxies(cfg config.Config) *util.IPAllowlist {
 	trustedProxies, err := util.NewIPAllowlist(cfg.TrustedProxyCIDRs)
 	if err != nil {
-		trustedProxies = nil
+		return nil
 	}
+	return trustedProxies
+}
+
+func newHandlerHTTPClients(cfg config.Config) handlerHTTPClients {
 	urlGuard := security.NewOutboundURLValidator(nil)
 	requestTimeout := cfg.UpstreamTimeout
 	if requestTimeout <= 0 {
@@ -89,16 +124,24 @@ func NewHandler(cfg config.Config, startedAt time.Time) *Handler {
 		IdleConnTimeout:       transportOptions.IdleConnTimeout,
 		Validator:             transportOptions.Validator,
 	})
-	bufferPool := network.NewBufferPool()
-	metricsCollector := metrics.NewContentDeliveryMetrics()
-	hlsWorkers := cfg.HLSSegmentWorkerCount
-	if hlsWorkers <= 0 {
-		hlsWorkers = 5
+
+	return handlerHTTPClients{
+		guarded:   guardedClient,
+		streaming: streamingClient,
+		urlGuard:  urlGuard,
 	}
-	hlsRetries := cfg.HLSSegmentMaxRetries
-	if hlsRetries < 0 {
-		hlsRetries = 3
-	}
+}
+
+func newStatsStore(cfg config.Config, startedAt time.Time) ports.StatsStore {
+	return persistence.NewPublicStatsStore(startedAt, persistence.PublicStatsPersistenceOptions{
+		Enabled:        cfg.StatsPersistEnabled,
+		FilePath:       cfg.StatsPersistFilePath,
+		FlushInterval:  cfg.StatsPersistFlushInterval,
+		FlushThreshold: cfg.StatsPersistFlushThreshold,
+	})
+}
+
+func newMergePool(cfg config.Config, metricsCollector *metrics.ContentDeliveryMetrics) *merge.MergeWorkerPool {
 	mergeWorkerCount := cfg.MergeWorkerCount
 	if mergeWorkerCount <= 0 {
 		mergeWorkerCount = 3
@@ -110,32 +153,7 @@ func NewHandler(cfg config.Config, startedAt time.Time) *Handler {
 		metricsCollector.SetMergeQueueDepth(mergePool.QueueDepth())
 	}
 
-	return &Handler{
-		config:     cfg,
-		startedAt:  startedAt,
-		httpClient: guardedClient,
-		statsStore: persistence.NewPublicStatsStore(startedAt, persistence.PublicStatsPersistenceOptions{
-			Enabled:        cfg.StatsPersistEnabled,
-			FilePath:       cfg.StatsPersistFilePath,
-			FlushInterval:  cfg.StatsPersistFlushInterval,
-			FlushThreshold: cfg.StatsPersistFlushThreshold,
-		}),
-		Streamer:  network.NewStreamerWithClient(streamingClient),
-		extractor: cachedExtractor,
-		headCache: cache.NewTTLCacheWithMaxEntries(2048),
-		clientIPFn: func(r *http.Request) string {
-			return util.ClientIPFromRequestWithTrustedProxies(r, trustedProxies)
-		},
-		urlGuard:             urlGuard,
-		headDeduplicator:     cache.NewHeadDeduplicator(guardedClient, cfg.CacheProxyHeadTTL, 2048),
-		bufferPool:           bufferPool,
-		streamingDownloader:  network.NewStreamingDownloader(bufferPool),
-		concurrentDownloader: network.NewConcurrentDownloader(streamingClient),
-		hlsParser:            infrahls.NewParser(),
-		hlsDownloader:        infrahls.NewSegmentDownloader(streamingClient, hlsWorkers, hlsRetries),
-		mergePool:            mergePool,
-		metrics:              metricsCollector,
-	}
+	return mergePool
 }
 
 func upstreamTransportTimeout(value, fallback time.Duration) time.Duration {

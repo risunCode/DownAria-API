@@ -36,11 +36,6 @@ func NewRouter(h *handlers.Handler, cfg config.Config) http.Handler {
 	r.Get("/api/v1/stats/public", h.PublicStats)
 	r.Get("/metrics", h.Metrics)
 
-	// HLS stream routes - no signature required for player compatibility
-	hlsGate := middleware.FeatureGate{Enabled: cfg.HLSStreamingEnabled, Rollout: cfg.HLSStreamingRollout}
-	r.With(middleware.RequireFeature(hlsGate, h.Proxy)).Get("/api/web/hls-stream", h.HLSStream)
-	r.With(middleware.RequireFeature(hlsGate, h.Proxy)).Get("/api/v1/hls-stream", h.HLSStream)
-
 	r.Route("/api/web", func(web chi.Router) {
 		web.Use(originProtected)
 		web.Use(webSignature)

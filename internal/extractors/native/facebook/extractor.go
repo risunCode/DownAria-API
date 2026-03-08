@@ -592,7 +592,7 @@ func (e *FacebookExtractor) buildVariantFilename(metadata fbMetadata, finalURL, 
 		return core.GenerateFilename(author, "story", "", ext)
 	}
 
-	return core.GenerateFilenameWithMeta(metadata.Author, metadata.Title, metadata.Author, "", ext)
+	return core.GenerateFilename(metadata.Author, metadata.Title, "", ext)
 }
 
 func isFacebookStoryURL(urlStr string) bool {
@@ -733,7 +733,7 @@ func buildStoryIdentifier(createdAt, finalURL string) string {
 		return storyID
 	}
 
-	return core.BuildFilenameID("", "")
+	return ""
 }
 
 func extractStoryIDFromURL(finalURL string) string {
