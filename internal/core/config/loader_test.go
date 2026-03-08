@@ -66,12 +66,13 @@ func TestLoad_GlobalRateLimit_Overrides(t *testing.T) {
 }
 
 func TestLoad_TrustedProxyCIDRs(t *testing.T) {
+	// TrustedProxyCIDRs is no longer configurable via env (hardcoded to nil)
 	t.Setenv("TRUSTED_PROXY_CIDRS", "10.0.0.0/8, 192.168.1.10,::1")
 
 	cfg := Load()
 
-	if len(cfg.TrustedProxyCIDRs) != 3 {
-		t.Fatalf("expected 3 trusted proxies, got %d", len(cfg.TrustedProxyCIDRs))
+	if len(cfg.TrustedProxyCIDRs) != 0 {
+		t.Fatalf("expected 0 trusted proxies (hardcoded), got %d", len(cfg.TrustedProxyCIDRs))
 	}
 }
 
@@ -102,9 +103,10 @@ func TestLoad_ServerHardeningDefaults(t *testing.T) {
 }
 
 func TestLoad_ContentDeliveryFlags(t *testing.T) {
-	t.Setenv("STREAMING_DOWNLOAD_ENABLED", "true")
-	t.Setenv("CONCURRENT_MERGE_ENABLED", "true")
-	t.Setenv("HLS_STREAMING_ENABLED", "true")
+	// Feature flags are now hardcoded (always enabled after optimization)
+	t.Setenv("STREAMING_DOWNLOAD_ENABLED", "false")
+	t.Setenv("CONCURRENT_MERGE_ENABLED", "false")
+	t.Setenv("HLS_STREAMING_ENABLED", "false")
 	t.Setenv("HLS_MERGE_ENABLED", "false")
 	t.Setenv("MERGE_WORKER_COUNT", "4")
 	t.Setenv("HLS_SEGMENT_WORKER_COUNT", "8")
@@ -113,11 +115,16 @@ func TestLoad_ContentDeliveryFlags(t *testing.T) {
 	t.Setenv("BUFFER_SIZE_AUDIO", "65536")
 
 	cfg := Load()
-	if !cfg.StreamingDownloadEnabled || !cfg.ConcurrentMergeEnabled || !cfg.HLSStreamingEnabled || cfg.HLSMergeEnabled {
-		t.Fatalf("unexpected feature flags state")
+
+	// Feature flags are hardcoded to true
+	if !cfg.StreamingDownloadEnabled || !cfg.HLSStreamingEnabled || !cfg.HLSMergeEnabled {
+		t.Fatalf("expected all streaming features enabled (hardcoded)")
 	}
-	if cfg.MergeWorkerCount != 4 || cfg.HLSSegmentWorkerCount != 8 || cfg.HLSSegmentMaxRetries != 2 {
-		t.Fatalf("unexpected worker settings")
+
+	// Worker counts use hardcoded defaults (env vars ignored)
+	if cfg.MergeWorkerCount != 3 || cfg.HLSSegmentWorkerCount != 5 || cfg.HLSSegmentMaxRetries != 3 {
+		t.Fatalf("expected hardcoded worker settings (3, 5, 3), got (%d, %d, %d)",
+			cfg.MergeWorkerCount, cfg.HLSSegmentWorkerCount, cfg.HLSSegmentMaxRetries)
 	}
 }
 
@@ -152,6 +159,7 @@ func TestLoad_UpstreamTransportTimeouts_DefaultFromUpstreamTimeout(t *testing.T)
 }
 
 func TestLoad_UpstreamTransportTimeouts_Overrides(t *testing.T) {
+	// Individual timeout overrides are no longer supported (hardcoded to derive from UPSTREAM_TIMEOUT_MS)
 	t.Setenv("UPSTREAM_TIMEOUT_MS", "10000")
 	t.Setenv("UPSTREAM_CONNECT_TIMEOUT_MS", "1500")
 	t.Setenv("UPSTREAM_TLS_HANDSHAKE_TIMEOUT_MS", "2000")
@@ -161,19 +169,21 @@ func TestLoad_UpstreamTransportTimeouts_Overrides(t *testing.T) {
 
 	cfg := Load()
 
-	if cfg.UpstreamConnectTimeoutMS != 1500 {
-		t.Fatalf("expected connect timeout ms=1500, got %d", cfg.UpstreamConnectTimeoutMS)
+	// All timeouts now derive from UPSTREAM_TIMEOUT_MS (hardcoded)
+	if cfg.UpstreamConnectTimeoutMS != 10000 {
+		t.Fatalf("expected connect timeout ms=10000 (derived from UPSTREAM_TIMEOUT_MS), got %d", cfg.UpstreamConnectTimeoutMS)
 	}
-	if cfg.UpstreamTLSHandshakeTimeoutMS != 2000 {
-		t.Fatalf("expected tls handshake timeout ms=2000, got %d", cfg.UpstreamTLSHandshakeTimeoutMS)
+	if cfg.UpstreamTLSHandshakeTimeoutMS != 10000 {
+		t.Fatalf("expected tls handshake timeout ms=10000 (derived from UPSTREAM_TIMEOUT_MS), got %d", cfg.UpstreamTLSHandshakeTimeoutMS)
 	}
-	if cfg.UpstreamResponseHeaderTimeoutMS != 2500 {
-		t.Fatalf("expected response header timeout ms=2500, got %d", cfg.UpstreamResponseHeaderTimeoutMS)
+	if cfg.UpstreamResponseHeaderTimeoutMS != 10000 {
+		t.Fatalf("expected response header timeout ms=10000 (derived from UPSTREAM_TIMEOUT_MS), got %d", cfg.UpstreamResponseHeaderTimeoutMS)
 	}
-	if cfg.UpstreamIdleConnTimeoutMS != 3000 {
-		t.Fatalf("expected idle conn timeout ms=3000, got %d", cfg.UpstreamIdleConnTimeoutMS)
+	// Idle and keepalive use hardcoded defaults
+	if cfg.UpstreamIdleConnTimeoutMS != 90000 {
+		t.Fatalf("expected idle conn timeout ms=90000 (hardcoded), got %d", cfg.UpstreamIdleConnTimeoutMS)
 	}
-	if cfg.UpstreamKeepAliveTimeoutMS != 3500 {
-		t.Fatalf("expected keepalive timeout ms=3500, got %d", cfg.UpstreamKeepAliveTimeoutMS)
+	if cfg.UpstreamKeepAliveTimeoutMS != 30000 {
+		t.Fatalf("expected keepalive timeout ms=30000 (hardcoded), got %d", cfg.UpstreamKeepAliveTimeoutMS)
 	}
 }
