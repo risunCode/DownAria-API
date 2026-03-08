@@ -56,6 +56,30 @@ func (bp *BufferPool) SizeForContentType(contentType string) int {
 	return size
 }
 
+// OptimalSizeForContentType returns optimal buffer size based on content type and content length
+// This provides better performance by adapting buffer size to file size
+func (bp *BufferPool) OptimalSizeForContentType(contentType string, contentLength int64) int {
+	baseSize := bp.SizeForContentType(contentType)
+
+	// For very large files (>100MB), use larger buffers for better throughput
+	if contentLength > 100*1024*1024 {
+		// Double the buffer size, but cap at 512KB
+		optimized := baseSize * 2
+		if optimized > 512*1024 {
+			optimized = 512 * 1024
+		}
+		return optimized
+	}
+
+	// For small files (<1MB), use smaller buffers to reduce memory waste
+	if contentLength > 0 && contentLength < 1024*1024 {
+		return 32 * 1024 // 32KB for small files
+	}
+
+	// For medium files or unknown size, use base size
+	return baseSize
+}
+
 func (bp *BufferPool) Get(size int) []byte {
 	if size <= 0 {
 		size = DefaultBufferSize

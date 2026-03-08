@@ -146,7 +146,10 @@ func (h *Handler) proxyWithMode(w http.ResponseWriter, r *http.Request, forceDow
 	w.WriteHeader(result.StatusCode)
 	maxBytes := h.proxySizeLimitBytes(isDownload)
 	limited := io.NopCloser(io.LimitReader(result.Body, maxBytes))
-	written, streamErr := h.streamingDownloader.StreamWithBuffer(r.Context(), limited, w, result.ContentType)
+
+	// Use optimized single-goroutine streaming with progressive flushing
+	written, streamErr := h.streamingDownloader.StreamWithBuffer(r.Context(), limited, w, result.ContentType, result.ContentLength)
+
 	if streamErr != nil {
 		h.metrics.AddFailure()
 		h.observeCancellationMetric(r.Context(), streamErr)

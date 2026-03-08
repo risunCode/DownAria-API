@@ -83,16 +83,27 @@ func NewHTTPClientWithOptions(opts HTTPClientOptions) *http.Client {
 	}
 
 	transport := &http.Transport{
-		MaxIdleConns:          100,
-		MaxIdleConnsPerHost:   10,
-		MaxConnsPerHost:       20,
-		IdleConnTimeout:       normalized.IdleConnTimeout,
-		DisableKeepAlives:     false,
-		DialContext:           dialContext,
+		// Optimized connection pool settings for high-throughput downloads
+		MaxIdleConns:        200, // Increased from 100 to support more concurrent connections
+		MaxIdleConnsPerHost: 20,  // Increased from 10 to reduce connection churn
+		MaxConnsPerHost:     100, // Increased from 20 to handle more concurrent downloads per host
+
+		IdleConnTimeout:   normalized.IdleConnTimeout,
+		DisableKeepAlives: false,
+		DialContext:       dialContext,
+
+		// Disable automatic compression to avoid double-compression overhead
+		// The client can handle compression, and we're proxying raw bytes
+		DisableCompression: true,
+
 		TLSHandshakeTimeout:   normalized.TLSHandshakeTimeout,
 		ResponseHeaderTimeout: normalized.ResponseHeaderTimeout,
 		ForceAttemptHTTP2:     true,
 		ExpectContinueTimeout: 1 * time.Second,
+
+		// Larger buffers for better throughput on large file transfers
+		WriteBufferSize: 256 * 1024, // 256KB write buffer
+		ReadBufferSize:  256 * 1024, // 256KB read buffer
 	}
 
 	checkRedirect := func(req *http.Request, via []*http.Request) error {

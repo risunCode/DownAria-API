@@ -51,7 +51,7 @@ func (h *Handler) HandleHLSRequest(w http.ResponseWriter, r *http.Request, route
 		w.Header().Set("Cache-Control", "public, max-age=86400, immutable")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.WriteHeader(result.StatusCode)
-		n, err := h.streamingDownloader.StreamWithBuffer(r.Context(), result.Body, w, result.ContentType)
+		n, err := h.streamingDownloader.StreamWithBuffer(r.Context(), result.Body, w, result.ContentType, result.ContentLength)
 		if err == nil {
 			h.metrics.AddDownload(n, time.Since(start))
 		}

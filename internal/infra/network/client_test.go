@@ -17,14 +17,26 @@ func TestNewHTTPClient_TransportConfig(t *testing.T) {
 		t.Fatalf("expected *http.Transport, got %T", client.Transport)
 	}
 
-	if transport.MaxIdleConns != 100 {
-		t.Fatalf("MaxIdleConns=%d, want 100", transport.MaxIdleConns)
+	// Optimized connection pool settings
+	if transport.MaxIdleConns != 200 {
+		t.Fatalf("MaxIdleConns=%d, want 200", transport.MaxIdleConns)
 	}
-	if transport.MaxIdleConnsPerHost != 10 {
-		t.Fatalf("MaxIdleConnsPerHost=%d, want 10", transport.MaxIdleConnsPerHost)
+	if transport.MaxIdleConnsPerHost != 20 {
+		t.Fatalf("MaxIdleConnsPerHost=%d, want 20", transport.MaxIdleConnsPerHost)
 	}
-	if transport.MaxConnsPerHost != 20 {
-		t.Fatalf("MaxConnsPerHost=%d, want 20", transport.MaxConnsPerHost)
+	if transport.MaxConnsPerHost != 100 {
+		t.Fatalf("MaxConnsPerHost=%d, want 100", transport.MaxConnsPerHost)
+	}
+	// Optimized: compression disabled to avoid double compression
+	if !transport.DisableCompression {
+		t.Fatalf("DisableCompression=false, want true")
+	}
+	// Optimized: larger buffers for better throughput
+	if transport.WriteBufferSize != 256*1024 {
+		t.Fatalf("WriteBufferSize=%d, want 262144", transport.WriteBufferSize)
+	}
+	if transport.ReadBufferSize != 256*1024 {
+		t.Fatalf("ReadBufferSize=%d, want 262144", transport.ReadBufferSize)
 	}
 	if transport.IdleConnTimeout != 90*time.Second {
 		t.Fatalf("IdleConnTimeout=%v, want 90s", transport.IdleConnTimeout)
