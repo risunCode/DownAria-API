@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DownAria-API Status</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #09090b;
+      --surface: #121216;
+      --surface-raised: #18181b;
+      --border: rgba(255, 255, 255, 0.08);
+      --border-bright: rgba(255, 255, 255, 0.15);
+      --fg: #fafafa;
+      --muted: #a1a1aa;
+      --accent: #ffffff;
+      --ok: #22c55e;
+      --warn: #f59e0b;
+      --error: #ef4444;
+      --font-main: 'Outfit', ui-sans-serif, system-ui, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: var(--font-main);
+      background-color: var(--bg);
+      color: var(--fg);
+      -webkit-font-smoothing: antialiased;
+      line-height: 1.5;
+    }
+
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 40px 24px;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 48px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 24px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 24px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--ok);
+      box-shadow: 0 0 12px var(--ok);
+    }
+
+    .timestamp {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    section-title {
+      display: block;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--muted);
+      letter-spacing: 0.1em;
+      margin: 40px 0 20px 0;
+      text-transform: uppercase;
+    }
+
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 20px;
+    }
+
+    .specs-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 24px;
+      transition: all 0.2s ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .card:hover {
+      border-color: var(--border-bright);
+      background: var(--surface-raised);
+    }
+
+    .spec-card {
+      padding: 16px 20px;
+      border-radius: 12px;
+    }
+
+    .card-label {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--muted);
+      margin-bottom: 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .spec-label {
+      margin-bottom: 8px;
+      font-size: 11px;
+    }
+
+    .card-value {
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      font-family: var(--font-main);
+    }
+
+    .spec-value {
+      font-size: 15px;
+      font-weight: 600;
+      font-family: var(--font-mono);
+      color: var(--fg);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .card-sub {
+      margin-top: 12px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .tier-info {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid rgba(255,255,255,0.03);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .tier-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 10px;
+      font-family: var(--font-mono);
+      color: var(--muted);
+      opacity: 0.7;
+    }
+
+    .progress-track {
+      height: 4px;
+      background: rgba(255,255,255,0.05);
+      border-radius: 2px;
+      margin-top: 12px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 2px;
+      transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .badge {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--border);
+      color: var(--fg);
+    }
+
+    .frontend-link {
+      color: var(--accent);
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      opacity: 0.7;
+      transition: opacity 0.2s;
+    }
+
+    .frontend-link:hover {
+      opacity: 1;
+    }
+
+    @media (max-width: 640px) {
+      .container { padding: 24px 16px; }
+      header { flex-direction: column; gap: 16px; margin-bottom: 32px; }
+      .card-value { font-size: 24px; }
+      .subtitle-wrap { flex-direction: column; align-items: flex-start !important; gap: 4px !important; }
+      .sep { display: none; }
+    }
+
+    /* Animation */
+    @keyframes pulse {
+      0% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.7; transform: scale(0.95); }
+      100% { opacity: 1; transform: scale(1); }
+    }
+    .updating { animation: pulse 0.5s ease; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div>
+        <h1><span class="status-dot" id="dot"></span> DownAria-API Status</h1>
+        <div class="subtitle-wrap" style="margin-top: 6px; font-size: 14px; color: var(--muted); display: flex; align-items: center; gap: 8px;">
+          <span>System integrity and resource monitoring</span>
+          <span class="sep" style="opacity: 0.3">|</span>
+          <a href="https://downaria.vercel.app" target="_blank" class="frontend-link">
+             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+             DownAria Frontend
+          </a>
+        </div>
+      </div>
+      <div class="timestamp" id="updated">Initializing...</div>
+    </header>
+
+    <section-title>Live Performance</section-title>
+    <div class="dashboard-grid">
+      <!-- App Status -->
+      <div class="card">
+        <div class="card-label">UPTIME</div>
+        <div class="card-value" id="uptime">-</div>
+        <div class="card-sub">
+          <span>STATUS: <span id="status" style="color: var(--ok)">ONLINE</span></span>
+        </div>
+      </div>
+
+      <!-- Workers -->
+      <div class="card">
+        <div class="card-label">ACTIVE JOBS <span class="badge" id="gomax">-</span></div>
+        <div class="card-value" id="jobs">0</div>
+        <div class="card-sub">
+          <span>GO ROUTINES: <span id="goroutines">-</span></span>
+        </div>
+      </div>
+
+      <!-- Network In -->
+      <div class="card">
+        <div class="card-label">INBOUND TRAFFIC</div>
+        <div class="card-value" id="in">0 B/s</div>
+        <div class="card-sub">
+          <span>TOTAL: <span id="inTotal">0</span></span>
+        </div>
+      </div>
+
+      <!-- Network Out -->
+      <div class="card">
+        <div class="card-label">OUTBOUND TRAFFIC</div>
+        <div class="card-value" id="out">0 B/s</div>
+        <div class="card-sub">
+          <span>TOTAL: <span id="outTotal">0</span></span>
+        </div>
+      </div>
+
+      <!-- RAM -->
+      <div class="card">
+        <div class="card-label">MEMORY (LOCAL / LIMIT)</div>
+        <div class="card-value"><span id="ramAppUsed">-</span> <span style="opacity: 0.3; font-size: 0.6em; font-weight: 400">/ <span id="ramAppLimit">-</span></span></div>
+        <div class="progress-track">
+          <div class="progress-fill" id="ramBar" style="width: 0%"></div>
+        </div>
+        <div class="tier-info">
+          <div class="tier-row"><span>Railway Global:</span> <span id="ramGlobalUsed">-</span></div>
+        </div>
+      </div>
+
+      <!-- Storage -->
+      <div class="card">
+        <div class="card-label">STORAGE (TEMP / LIMIT)</div>
+        <div class="card-value"><span id="diskTempUsed">-</span> <span style="opacity: 0.3; font-size: 0.6em; font-weight: 400">/ <span id="diskAppLimit">-</span></span></div>
+        <div class="progress-track">
+          <div class="progress-fill" id="diskBar" style="width: 0%"></div>
+        </div>
+        <div class="tier-info">
+          <div class="tier-row"><span>Mount Point:</span> <span id="diskLocalUsed">-</span></div>
+          <div class="tier-row"><span>Railway Global:</span> <span id="diskGlobalUsed">-</span></div>
+        </div>
+      </div>
+    </div>
+
+    <section-title>System Configuration</section-title>
+    <div class="specs-grid">
+      <div class="card spec-card">
+        <div class="card-label spec-label">SYSTEM (OS / ARCH / KERNEL)</div>
+        <div class="spec-value" id="spec-combined">-</div>
+      </div>
+      <div class="card spec-card">
+        <div class="card-label spec-label">HARDWARE (CORES / RAM)</div>
+        <div class="spec-value" id="spec-hardware">-</div>
+      </div>
+      <div class="card spec-card">
+        <div class="card-label spec-label">RUNTIME (GO VERSION)</div>
+        <div class="spec-value" id="spec-go">-</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const byId = (id) => document.getElementById(id);
+    const formatTotal = (n) => {
+      let v = Number(n || 0), u = ['B','KB','MB','GB','TB'], i = 0;
+      while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+      return v.toFixed(1) + ' ' + u[i];
+    };
+
+    async function tick() {
+      const header = byId('updated');
+      try {
+        const res = await fetch('/health?format=json', { cache: 'no-store' });
+        const payload = await res.json();
+        const d = payload && payload.data ? payload.data : null;
+        if (!d) return;
+
+        // Update basic text
+        const activeCount = (d.jobs && d.jobs.active) || 0;
+        const jobSummary = (d.jobs && d.jobs.summary) || '';
+        
+        if (activeCount > 0) {
+          byId('status').textContent = jobSummary.toUpperCase();
+          byId('status').style.color = 'var(--accent)';
+        } else {
+          byId('status').textContent = (d.status || 'online').toUpperCase();
+          byId('status').style.color = 'var(--ok)';
+        }
+
+        byId('uptime').textContent = d.uptime || '-';
+        byId('jobs').textContent = String(activeCount);
+        byId('gomax').textContent = 'CORES: ' + (d.runtime ? d.runtime.gomaxprocs : '-');
+        byId('goroutines').textContent = d.runtime ? d.runtime.goroutines : '-';
+        
+        // Network
+        byId('in').textContent = d.network ? d.network.in_human : '0 B/s';
+        byId('out').textContent = d.network ? d.network.out_human : '0 B/s';
+        byId('inTotal').textContent = d.network ? formatTotal(d.network.in_bytes_total) : '0';
+        byId('outTotal').textContent = d.network ? formatTotal(d.network.out_bytes_total) : '0';
+        
+        // Specs
+        if (d.system && d.system.host) {
+          const os = d.system.host.os || '-';
+          const arch = (d.runtime && d.runtime.goarch) ? d.runtime.goarch : '-';
+          const kernel = d.system.host.kernel || '-';
+          byId('spec-combined').textContent = `${os} (${arch}) · ${kernel}`;
+          byId('spec-combined').title = `${os} (${arch}) · ${kernel}`;
+          
+          byId('spec-hardware').textContent = (d.system.host.cores || '-') + ' Cores / ' + (d.system.host.ram_total_human || '-');
+        }
+        if (d.runtime) {
+          byId('spec-go').textContent = d.runtime.go_version || '-';
+        }
+
+        // Timestamp
+        header.textContent = 'Last sync: ' + new Date().toLocaleTimeString('en-GB', { hour12: false });
+        header.classList.remove('updating');
+        void header.offsetWidth;
+        header.classList.add('updating');
+
+        // RAM Resources
+        if (d.system && d.system.ram) {
+          const ram = d.system.ram;
+          byId('ramAppUsed').textContent = ram.app_used || '-';
+          byId('ramAppLimit').textContent = ram.app_limit || '-';
+          
+          // Railway Global stats
+          byId('ramGlobalUsed').textContent = ram.global_used + ' / ' + ram.global_total;
+          
+          const ramTotal = ram.total_bytes || 1;
+          const ramUsed = ram.app_used_bytes || 0;
+          
+          // Use app limit for bar calculation
+          // To make it look like "Local / Limit", we should calculate based on detected local limit if possible
+          // But for now, we'll use the host total as the bar context but label it as Railway Global
+          byId('ramBar').style.width = Math.min(100, (ramUsed / ramTotal) * 100) + '%';
+        }
+
+        // Storage Resources
+        if (d.system && d.system.storage) {
+          const disk = d.system.storage;
+          byId('diskTempUsed').textContent = disk.app_used || '-';
+          byId('diskAppLimit').textContent = disk.app_limit || '892.0 MB';
+          
+          byId('diskLocalUsed').textContent = disk.used + ' / ' + disk.total;
+          byId('diskGlobalUsed').textContent = (disk.global_used || disk.used) + ' / ' + (disk.global_total || disk.total);
+          
+          const diskLimit = (892 * 1024 * 1024); // 892MB for App context
+          const diskUsed = disk.app_used_bytes || 0;
+          byId('diskBar').style.width = Math.min(100, (diskUsed / diskLimit) * 100) + '%';
+        }
+
+        // Pulse dot
+        const dot = byId('dot');
+        dot.style.background = 'var(--ok)';
+        dot.style.boxShadow = '0 0 12px var(--ok)';
+
+      } catch (e) {
+        console.error(e);
+        byId('status').textContent = 'UNREACHABLE';
+        byId('status').style.color = 'var(--error)';
+        const dot = byId('dot');
+        dot.style.background = 'var(--error)';
+        dot.style.boxShadow = '0 0 12px var(--error)';
+      }
+    }
+
+    tick();
+    setInterval(tick, 3000);
+  </script>
+</body>
+</html>

@@ -7,3 +7,12 @@ healthcheckPath = "/health"
 healthcheckTimeout = 120
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
+
+[env]
+ADDR = ":8080"
+HTTP_WRITE_TIMEOUT = "5m"
+LOG_LEVEL = "info"
+LOG_FORMAT = "json"
+EXTRACT_TIMEOUT = "30s"
+EXTRACT_CACHE_TTL = "10m"
+YTDLP_BINARY = "yt-dlp"
